@@ -17,13 +17,12 @@
 
 package org.apache.spark.mllib.regression
 
-import breeze.linalg.{DenseVector => BDV, SparseVector => BSV}
-
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.{Logging, SparkException}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.mllib.optimization._
 import org.apache.spark.mllib.linalg.{Vectors, Vector}
+import org.apache.spark.mllib.optimization._
+import org.apache.spark.mllib.util.MLUtils._
 
 /**
  * :: DeveloperApi ::
@@ -37,6 +36,9 @@ import org.apache.spark.mllib.linalg.{Vectors, Vector}
 @DeveloperApi
 abstract class GeneralizedLinearModel(val weights: Vector, val intercept: Double)
   extends Serializable {
+
+  /** Whether to add intercept (default: false). */
+  var addIntercept: Boolean = false
 
   /**
    * Predict the result given a data point and the weights learned.
@@ -82,13 +84,25 @@ abstract class GeneralizedLinearModel(val weights: Vector, val intercept: Double
 abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
   extends Logging with Serializable {
 
-  protected val validators: Seq[RDD[LabeledPoint] => Boolean] = List()
+  protected def validators: Seq[RDD[LabeledPoint] => Boolean] = List()
 
   /** The optimizer to solve the problem. */
   def optimizer: Optimizer
 
   /** Whether to add intercept (default: false). */
   protected var addIntercept: Boolean = false
+
+  /**
+   * This model contains multiple hyperplanes, which means multiple intercepts are required.
+   * Since it can not be stored in a single intercept variable, let's keep it inside weights vector
+   * and set the intercept variable to zero. (default: false).
+   */
+  protected def isMultipleIntercepts: Boolean = numOfIntercepts > 1
+
+  /**
+   * The number of intercepts in this model, (default: 1).
+   */
+  protected var numOfIntercepts: Int = 1
 
   protected var validateData: Boolean = true
 
@@ -120,18 +134,9 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
    */
   def run(input: RDD[LabeledPoint]): M = {
     val numFeatures: Int = input.first().features.size
-    val initialWeights = Vectors.dense(new Array[Double](numFeatures))
+    val dimOfWeights = if(isMultipleIntercepts) (numFeatures + 1) * numOfIntercepts else numFeatures
+    val initialWeights = Vectors.dense(new Array[Double](dimOfWeights))
     run(input, initialWeights)
-  }
-
-  /** Prepends one to the input vector. */
-  private def prependOne(vector: Vector): Vector = {
-    val vector1 = vector.toBreeze match {
-      case dv: BDV[Double] => BDV.vertcat(BDV.ones[Double](1), dv)
-      case sv: BSV[Double] => BSV.vertcat(new BSV[Double](Array(0), Array(1.0), 1), sv)
-      case v: Any => throw new IllegalArgumentException("Do not support vector type " + v.getClass)
-    }
-    Vectors.fromBreeze(vector1)
   }
 
   /**
@@ -147,27 +152,48 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
 
     // Prepend an extra variable consisting of all 1.0's for the intercept.
     val data = if (addIntercept) {
-      input.map(labeledPoint => (labeledPoint.label, prependOne(labeledPoint.features)))
+      input.map(labeledPoint => (labeledPoint.label, appendBias(labeledPoint.features)))
     } else {
       input.map(labeledPoint => (labeledPoint.label, labeledPoint.features))
     }
 
-    val initialWeightsWithIntercept = if (addIntercept) {
-      prependOne(initialWeights)
+    // TODO: We need a nicer api to allow users to set the initial intercept.
+    // Better by unifying the intercept and weights entirely into one vector make it cleaner.
+    // PS, if isMultipleIntercepts == true, users can set the intercepts by changing initialWeights
+    // which is different behavior when only having single intercept. We need to address this.
+    val initialWeightsWithIntercept = if (addIntercept && !isMultipleIntercepts) {
+      appendBias(initialWeights)
     } else {
       initialWeights
     }
 
+    assert(initialWeightsWithIntercept.toBreeze.length % data.first._2.toBreeze.length == 0)
+
     val weightsWithIntercept = optimizer.optimize(data, initialWeightsWithIntercept)
 
-    val intercept = if (addIntercept) weightsWithIntercept(0) else 0.0
+    // If the dimension of weightsWithIntercept / dimOfData != 1, the model have multiple
+    // hyperplane, which means the multiple intercepts can not be stored in single intercept
+    // variable. We just keep it in weights vector and set the intercept variable to zero.
+//    val isMultipleIntercepts =
+//      if(weightsWithIntercept.toBreeze.length / dimOfData == 1) false else true
+
+    val intercept =
+      if (addIntercept && !isMultipleIntercepts) {
+        weightsWithIntercept(weightsWithIntercept.size - 1)
+      }
+      else {
+        0.0
+      }
+
     val weights =
-      if (addIntercept) {
-        Vectors.dense(weightsWithIntercept.toArray.slice(1, weightsWithIntercept.size))
+      if (addIntercept && !isMultipleIntercepts) {
+        Vectors.dense(weightsWithIntercept.toArray.slice(0, weightsWithIntercept.size - 1))
       } else {
         weightsWithIntercept
       }
 
-    createModel(weights, intercept)
+    val model = createModel(weights, intercept)
+    model.addIntercept = this.addIntercept
+    model
   }
 }

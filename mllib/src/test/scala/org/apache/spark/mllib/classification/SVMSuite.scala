@@ -27,6 +27,7 @@ import org.jblas.DoubleMatrix
 import org.apache.spark.SparkException
 import org.apache.spark.mllib.regression._
 import org.apache.spark.mllib.util.LocalSparkContext
+import org.apache.spark.mllib.util.TestingUtils._
 import org.apache.spark.mllib.linalg.Vectors
 
 object SVMSuite {
@@ -60,14 +61,6 @@ object SVMSuite {
 }
 
 class SVMSuite extends FunSuite with LocalSparkContext {
-
-  def validatePrediction(predictions: Seq[Double], input: Seq[LabeledPoint]) {
-    val numOffPredictions = predictions.zip(input).count { case (prediction, expected) =>
-      prediction != expected.label
-    }
-    // At least 80% of the predictions should be on.
-    assert(numOffPredictions < input.length / 5)
-  }
 
   test("SVM with threshold") {
     val nPoints = 10000
@@ -128,10 +121,14 @@ class SVMSuite extends FunSuite with LocalSparkContext {
     val validationRDD  = sc.parallelize(validationData, 2)
 
     // Test prediction on RDD.
-    validatePrediction(model.predict(validationRDD.map(_.features)).collect(), validationData)
+    assert(validateCategoricalPrediction(
+      model.predict(validationRDD.map(_.features)).collect(), validationData, 0.8),
+      "prediction accuracy should be at least higher than 80%")
 
     // Test prediction on Array.
-    validatePrediction(validationData.map(row => model.predict(row.features)), validationData)
+    assert(validateCategoricalPrediction(
+      validationData.map(row => model.predict(row.features)), validationData, 0.8),
+      "prediction accuracy should be at least higher than 80%")
   }
 
   test("SVM local random SGD with initial weights") {
@@ -160,10 +157,14 @@ class SVMSuite extends FunSuite with LocalSparkContext {
     val validationRDD  = sc.parallelize(validationData,2)
 
     // Test prediction on RDD.
-    validatePrediction(model.predict(validationRDD.map(_.features)).collect(), validationData)
+    assert(validateCategoricalPrediction(
+      model.predict(validationRDD.map(_.features)).collect(), validationData, 0.8),
+      "prediction accuracy should be at least higher than 80%")
 
     // Test prediction on Array.
-    validatePrediction(validationData.map(row => model.predict(row.features)), validationData)
+    assert(validateCategoricalPrediction(
+      validationData.map(row => model.predict(row.features)), validationData, 0.8),
+      "prediction accuracy should be at least higher than 80%")
   }
 
   test("SVM with invalid labels") {

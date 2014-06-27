@@ -17,7 +17,7 @@
 
 package org.apache.spark.mllib.optimization
 
-import breeze.linalg.{axpy => brzAxpy}
+import breeze.linalg.{axpy => brzAxpy, DenseVector => BDV}
 
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.mllib.linalg.{Vectors, Vector}
@@ -55,43 +55,61 @@ abstract class Gradient extends Serializable {
 
 /**
  * :: DeveloperApi ::
- * Compute gradient and loss for a logistic loss function, as used in binary classification.
+ * Compute gradient and loss for a multinomial logistic loss function,
+ * as used in multi-class classification (it is also used in binary logistic regression).
  * See also the documentation for the precise formulation.
  */
 @DeveloperApi
 class LogisticGradient extends Gradient {
-  override def compute(data: Vector, label: Double, weights: Vector): (Vector, Double) = {
-    val brzData = data.toBreeze
-    val brzWeights = weights.toBreeze
-    val margin: Double = -1.0 * brzWeights.dot(brzData)
-    val gradientMultiplier = (1.0 / (1.0 + math.exp(margin))) - label
-    val gradient = brzData * gradientMultiplier
-    val loss =
-      if (label > 0) {
-        math.log(1 + math.exp(margin))
-      } else {
-        math.log(1 + math.exp(margin)) - margin
-      }
-
-    (Vectors.fromBreeze(gradient), loss)
-  }
+  override def compute(data: Vector, label: Double, weights: Vector): (Vector, Double) = ???
 
   override def compute(
       data: Vector,
       label: Double,
       weights: Vector,
       cumGradient: Vector): Double = {
+    def alpha(i: Int): Int = if (i == 0) 1 else 0
+    def delta(i: Int, j: Int): Int = if (i == j) 1 else 0
+
     val brzData = data.toBreeze
     val brzWeights = weights.toBreeze
-    val margin: Double = -1.0 * brzWeights.dot(brzData)
-    val gradientMultiplier = (1.0 / (1.0 + math.exp(margin))) - label
+    val brzCumGradient = cumGradient.toBreeze
 
-    brzAxpy(gradientMultiplier, brzData, cumGradient.toBreeze)
+    assert((brzWeights.length % brzData.length) == 0)
+    assert(cumGradient.toBreeze.length == brzWeights.length)
 
-    if (label > 0) {
-      math.log(1 + math.exp(margin))
-    } else {
-      math.log(1 + math.exp(margin)) - margin
+    val nClasses = (brzWeights.length / brzData.length) + 1
+    val classLabel = math.round(label).toInt
+
+    var denominator = 1.0
+    val numerators = Array.ofDim[Double](nClasses - 1)
+
+    var i = 0
+    while (i < nClasses - 1) {
+      var acc = 0.0
+      brzData.activeIterator.foreach {
+        case (_, 0.0) => // Skip explicit zero elements.
+        case (j, value) => acc += value * brzWeights((i * brzData.length) + j)
+      }
+      numerators(i) = math.exp(acc)
+      denominator += numerators(i)
+      i += 1
+    }
+
+    i = 0
+    while (i < nClasses - 1) {
+      brzData.activeIterator.foreach {
+        case (_, 0.0) => // Skip explicit zero elements.
+        case (j, value) => brzCumGradient(i * data.toBreeze.length + j) -=
+          ((1 - alpha(classLabel)) * delta(classLabel, i + 1) - numerators(i) / denominator) *
+            brzData(j)
+      }
+      i += 1
+    }
+
+    classLabel match {
+      case 0 => -math.log(1.0 / denominator)
+      case _ => -math.log(numerators(classLabel - 1) / denominator)
     }
   }
 }

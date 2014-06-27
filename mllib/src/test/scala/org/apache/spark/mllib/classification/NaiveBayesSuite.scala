@@ -24,6 +24,7 @@ import org.scalatest.FunSuite
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.mllib.util.LocalSparkContext
+import org.apache.spark.mllib.util.TestingUtils._
 
 object NaiveBayesSuite {
 
@@ -61,15 +62,6 @@ object NaiveBayesSuite {
 
 class NaiveBayesSuite extends FunSuite with LocalSparkContext {
 
-  def validatePrediction(predictions: Seq[Double], input: Seq[LabeledPoint]) {
-    val numOfPredictions = predictions.zip(input).count {
-      case (prediction, expected) =>
-        prediction != expected.label
-    }
-    // At least 80% of the predictions should be on.
-    assert(numOfPredictions < input.length / 5)
-  }
-
   test("Naive Bayes") {
     val nPoints = 10000
 
@@ -90,9 +82,13 @@ class NaiveBayesSuite extends FunSuite with LocalSparkContext {
     val validationRDD = sc.parallelize(validationData, 2)
 
     // Test prediction on RDD.
-    validatePrediction(model.predict(validationRDD.map(_.features)).collect(), validationData)
+    assert(validateCategoricalPrediction(
+      model.predict(validationRDD.map(_.features)).collect(), validationData, 0.8),
+      "prediction accuracy should be at least higher than 80%")
 
     // Test prediction on Array.
-    validatePrediction(validationData.map(row => model.predict(row.features)), validationData)
+    assert(validateCategoricalPrediction(
+      validationData.map(row => model.predict(row.features)), validationData, 0.8),
+      "prediction accuracy should be at least higher than 80%")
   }
 }
