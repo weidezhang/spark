@@ -18,7 +18,9 @@
 package org.apache.spark.mllib.classification
 
 import scala.math._
-import breeze.linalg.{axpy => brzAxpy, Vector => BV}
+import breeze.linalg.{axpy => brzAxpy, Vector => BV, DenseVector => BDV, DenseMatrix => BDM, sum => Bsum}
+import breeze.numerics.{sigmoid => Bsigmoid, round => Bround}
+import breeze.generic._
 import org.apache.spark.mllib.linalg
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.optimization.{Updater, GradientDescent, Gradient}
@@ -26,45 +28,6 @@ import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.linalg.BLAS.{axpy}
 import org.apache.spark.annotation.Experimental
-
-/**
- * ::Experimental::
- * Helper Trait for neural network
- * Implements addressing to array of weights
- */
-@Experimental
-private[classification] trait NeuralNetworkHelper {
-
-  def layers: Array[Int]
-  def sigmoid ( value: Double) : Double = 1d / (1d + exp(-value))
-  protected lazy val weightCount =
-    (for(i <- 1 until layers.size) yield layers(i - 1) * layers(i)).sum
-  protected lazy val outputCount = layers.sum - (if (layers.size > 0) layers(0) else 0)
-
-  protected def weightIndex(layer: Int, neuron: Int, connection: Int): Int = {
-    var layerOffset = 0
-    if(layer == 0) {
-      layerOffset = 0
-    } else {
-      for (i <- 1 until layer) {
-        layerOffset += layers(i - 1) * layers(i)
-      }
-    }
-    layerOffset + neuron * layers(layer - 1) + connection
-  }
-
-  protected def outputIndex(layer: Int, neuron: Int): Int = {
-    var layerOffset = 0
-    for (i <- 1 until layer) {
-      layerOffset += layers(i)
-    }
-    layerOffset + neuron
-  }
-
-  protected def forwardRun(weights: Array[Double], inputs: Array[Double]) = {
-    /* TODO implement forward run and share across gradient and model */
-  }
-}
 
 /**
  * ::Experimental::
@@ -88,8 +51,8 @@ private[classification] trait LabelConverter {
    * returns array of size 1 with label
    * @param label label
    */
-  protected def label2Array(label: Double): Array[Double] = {
-    val result = Array.fill(resultCount)(0.0)
+  protected def label2Vector(label: Double): BDV[Double] = {
+    val result = BDV.zeros[Double](resultCount)
     if (resultCount == 1) result(0) = label else result(label.toInt) = 1.0
     result
   }
@@ -99,104 +62,69 @@ private[classification] trait LabelConverter {
    * array of double
    * @param resultArray array that represents a label for neural network
    */
-  protected def array2Label(resultArray: Array[Int]): Double = {
+  protected def vector2Label(resultVector: BDV[Double]): Double = {
+    val resultArray = resultVector.toArray.map{ x => math.round(x)}
     if(resultArray.size == 1) resultArray(0) else resultArray.indexOf(1.0).toDouble
   }
 }
 
-private class NeuralNetworkGradient(layerSizes: Array[Int])
-  extends Gradient with NeuralNetworkHelper with LabelConverter{
+private class NeuralNetworkGradient(val layers: Array[Int])
+  extends Gradient with LabelConverter{
 
-  override def layers = layerSizes
   override def resultCount = layers.last
-  val outputs = Array.fill(outputCount)(0.0)
-  val errors = Array.fill(outputCount)(0.0)
-  val gradient = Array.fill(weightCount)(0.0)
+
+  private lazy val weightCount =
+    (for(i <- 1 until layers.size) yield layers(i - 1) * layers(i)).sum
+
 
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector):
-  (linalg.Vector, Double) = {
-    /* Perceptron run */
-    val inputs: IndexedSeq[Double] = data.toArray
-    val targetOutputs = label2Array(label)
+    (linalg.Vector, Double) = {
+
+    /* NB! weightArray, gradArray, errorArray have NULL zero element for addressing convenience */
+    val weightArray = new Array[BDM[Double]](layers.size)
+    var offset = 0
     val weightsCopy = weights.toArray
-    var layerIndex = 1     /* loop through layers */
-    while (layerIndex < layers.size) {
-      var neuronIndex = 0  /* loop through neurons in the layer */
-      while (neuronIndex < layers(layerIndex)){
-        var cumul : Double = 0
-        var inputIndex = 0 /* run through neuron */
-        if(layerIndex == 1){
-          while (inputIndex < inputs.size){
-            cumul += inputs(inputIndex) *
-              weightsCopy(weightIndex(layerIndex, neuronIndex, inputIndex))
-            inputIndex += 1
-          }
-        }else{
-          while (inputIndex < layers(layerIndex - 1)){
-            cumul += outputs(outputIndex(layerIndex - 1, inputIndex)) *
-              weightsCopy(weightIndex(layerIndex, neuronIndex, inputIndex))
-            inputIndex += 1
-          }
-        }
-        /* TODO: add bias! */
-        outputs(outputIndex(layerIndex, neuronIndex)) = sigmoid(cumul)
-        neuronIndex += 1
+    for(i <- 1 until layers.size){
+      weightArray(i) = new BDM[Double](layers(i), layers(i - 1), weightsCopy, offset)
+      offset += layers(i) * layers(i - 1)
+    }
+
+    /* neural network forward propagation */
+    val outArray = new Array[BDV[Double]](layers.size)
+    outArray(0) = data.toBreeze.toDenseVector
+    for(i <- 1 until layers.size) {
+      outArray(i) = weightArray(i) * outArray(i - 1)
+      Bsigmoid.inPlace(outArray(i))
+    }
+
+    /* error back propagation */
+    val errorArray = new Array[BDV[Double]](layers.size)
+    val targetVector = label2Vector(label)
+    for(i <- (layers.size - 1) until (0, -1)){
+      val onesVector = BDV.ones[Double](outArray(i).length)
+      val outPrime = ( onesVector :- outArray(i)) :* outArray(i)
+      if(i == layers.size - 1){
+        errorArray(i) = (targetVector :- outArray(i)) :* outPrime
+      }else{
+        errorArray(i) = (weightArray(i + 1).t * errorArray(i + 1)) :* outPrime
       }
-      layerIndex += 1
     }
-    /* perceptron error back propagation */
-    layerIndex = layers.size - 1  //For each layer from last to first
-    while (layerIndex > 0) {
-      var neuronIndex = 0             //For every neuron in the layer
-      while (neuronIndex < layers(layerIndex)){
-        val neuronOutput = outputs(outputIndex(layerIndex, neuronIndex))
-        if(layerIndex == layers.size - 1){ //Last layer
-          errors(outputIndex(layerIndex, neuronIndex)) =
-            neuronOutput * (1 - neuronOutput) *
-              (targetOutputs(neuronIndex) - neuronOutput)
-        } else { //Hidden layers
-          var tmp : Double = 0
-          var nextNeuronIndex = 0
-          while (nextNeuronIndex < layers(layerIndex + 1)) {
-            tmp += errors(outputIndex(layerIndex + 1, nextNeuronIndex)) *
-              weightsCopy( weightIndex(layerIndex + 1, nextNeuronIndex, neuronIndex))
-            nextNeuronIndex += 1
-          }
-          errors(outputIndex(layerIndex, neuronIndex)) = neuronOutput * (1 - neuronOutput) * tmp
-        }
-        neuronIndex += 1
-      }
-      layerIndex -= 1
+
+    /* gradient */
+    val gradArray = new Array[BDM[Double]](layers.size)
+    for(i <- (layers.size - 1) until (0, -1)) {
+      gradArray(i) = errorArray(i) * outArray(i - 1).t
     }
-    /* perceptron weights gradient computation */
-    layerIndex = layers.size - 1
-    while (layerIndex > 0) {
-      val previousLayer = layerIndex - 1
-      var neuronIndex = 0
-      while (neuronIndex < layers(layerIndex)){
-        val neuronError = errors(outputIndex(layerIndex, neuronIndex))
-        var previousNeuronIndex = 0
-        while (previousNeuronIndex < layers(previousLayer)){
-          gradient(weightIndex(layerIndex, neuronIndex, previousNeuronIndex)) =
-            if(layerIndex == 1) {
-              neuronError * inputs(previousNeuronIndex)/* why times weight doesn't work? */
-            }else {
-              neuronError * outputs(outputIndex(previousLayer, previousNeuronIndex))
-            }
-          previousNeuronIndex += 1
-        }
-        neuronIndex += 1
-      }
-      layerIndex -= 1
+    var gV = gradArray(1).toDenseVector
+    for(i <- 2 until layers.size) {
+      gV = BDV.vertcat(gV, gradArray(i).toDenseVector)
     }
-    var error : Double = 0
-    var targetIndex = 0
-    while (targetIndex < targetOutputs.size) {
-      error += pow(targetOutputs(targetIndex) -
-        outputs(outputIndex(layers.size - 1, targetIndex)), 2)
-      targetIndex += 1
-    }
-    (Vectors.dense(gradient.clone()), error)
+
+    /*  breeze error */
+    val deltaVector = targetVector :- outArray(layers.size - 1)
+    val be = Bsum(deltaVector :* deltaVector)
+
+    (Vectors.fromBreeze(gV), be)
   }
 
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector,
@@ -208,14 +136,13 @@ private class NeuralNetworkGradient(layerSizes: Array[Int])
   }
 
   def initialWeights = Vectors.dense(Array.fill(weightCount){random * (2.4 *2)- 2.4})
-
 }
 
 /**
  * ::Experimental::
  * Neural network model.
  *
- * @param layerArray array of layer sizes,
+ * @param layers array of layer sizes,
  * first is the input size of the network,
  * last is the output size of the network.
  * @param weights vector of weights of
@@ -224,51 +151,32 @@ private class NeuralNetworkGradient(layerSizes: Array[Int])
  * + ... + hidden(N)*output
  */
 @Experimental
-class NeuralNetworkModel(layerArray: Array[Int], val weights: linalg.Vector)
-  extends ClassificationModel with NeuralNetworkHelper with LabelConverter with Serializable {
+class NeuralNetworkModel(val layers: Array[Int], val weights: linalg.Vector)
+  extends ClassificationModel with LabelConverter with Serializable {
 
-  override def layers = layerArray
   override def resultCount = layers.last
-  require(weightCount == weights.size)
-  private val outputs = Array.fill(outputCount){0.0}
+  //require(weightCount == weights.size)
+  private val weightsCopy = weights.toArray
+  private val weightArray = new Array[BDM[Double]](layers.size)
+  var offset = 0
+  for(i <- 1 until layers.size){
+    weightArray(i) = new BDM[Double](layers(i), layers(i - 1), weightsCopy, offset)
+    offset += layers(i) * layers(i - 1)
+  }
 
   override def predict(testData: RDD[linalg.Vector]): RDD[Double] = {
     testData.map(predict(_))
   }
 
   override def predict(testData: linalg.Vector): Double = {
-    val inputs = testData.toArray
     /* TODO: share this code with Gradient forward run */
-    var layerIndex = 1     /* loop through layers */
-    while (layerIndex < layers.size) {
-      var neuronIndex = 0  /* loop through neurons in the layer */
-      while (neuronIndex < layers(layerIndex)){
-        var cumul : Double = 0
-        var inputIndex = 0 /* run through neuron */
-        if(layerIndex == 1){
-          while (inputIndex < inputs.size){
-            cumul += inputs(inputIndex) *
-              weights(weightIndex(layerIndex, neuronIndex, inputIndex))
-            inputIndex += 1
-          }
-        }else{
-          while (inputIndex < layers(layerIndex - 1)){
-            cumul += outputs(outputIndex(layerIndex - 1, inputIndex)) *
-              weights(weightIndex(layerIndex, neuronIndex, inputIndex))
-            inputIndex += 1
-          }
-        }
-        /* TODO: add bias! */
-        outputs(outputIndex(layerIndex, neuronIndex)) = sigmoid(cumul)
-        neuronIndex += 1
-      }
-      layerIndex += 1
+    val outArray = new Array[BDV[Double]](layers.size)
+    outArray(0) = testData.toBreeze.toDenseVector
+    for(i <- 1 until layers.size) {
+      outArray(i) = weightArray(i) * outArray(i - 1)
+      Bsigmoid.inPlace(outArray(i))
     }
-    val lastLayer = layers.size - 1
-    val lastLayerSize = layers.last
-    val result = outputs.slice(outputIndex(lastLayer, 0), outputIndex(lastLayer, lastLayerSize))
-      .map(math.round(_).toInt)
-    array2Label(result)
+    vector2Label(outArray(layers.size - 1))
   }
 }
 
@@ -301,6 +209,7 @@ class NeuralNetwork private (hiddenLayers: Array[Int], numIterations: Int, learn
 private class GradientUpdater extends Updater {
   override def compute(weightsOld: linalg.Vector, gradient: linalg.Vector,
                        stepSize: Double, iter: Int, regParam: Double): (linalg.Vector, Double) = {
+    //println("Step:" + iter)
     val brzWeights: BV[Double] = weightsOld.toBreeze.toDenseVector
     brzAxpy(stepSize, gradient.toBreeze, brzWeights)
     (Vectors.fromBreeze(brzWeights), 0)

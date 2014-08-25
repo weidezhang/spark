@@ -17,11 +17,13 @@
 
 package org.apache.spark.mllib.classification
 
+import org.apache.spark.mllib.evaluation.MulticlassMetrics
+
 import scala.math.random
 import org.scalatest.FunSuite
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.mllib.util.LocalSparkContext
+import org.apache.spark.mllib.util.{MLUtils, LocalSparkContext}
 
 
 
@@ -73,5 +75,4 @@ class NeuralNetworkSuite extends FunSuite with LocalSparkContext {
       }
     }
   }
-
 }
