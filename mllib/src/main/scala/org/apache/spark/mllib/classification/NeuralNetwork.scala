@@ -38,17 +38,17 @@ import org.apache.spark.annotation.Experimental
 private[classification] trait LabelConverter {
 
   /**
-   * Returns the number of network ouputs
+   * Returns the number of network outputs
    * (of the outer layer)
    */
   protected def resultCount: Int
 
   /**
-   * Returns an array of double that has 1.0
+   * Returns a vector of double that has 1.0
    * at the index equals to label.toInt and
    * other element are zero
    * When resultCount is 2 then
-   * returns array of size 1 with label
+   * returns a vector of size 1 with label
    * @param label label
    */
   protected def label2Vector(label: Double): BDV[Double] = {
@@ -60,7 +60,7 @@ private[classification] trait LabelConverter {
   /**
    * Returns a label that corresponds to the
    * array of double
-   * @param resultArray array that represents a label for neural network
+   * @param resultVector vector that represents a label for neural network
    */
   protected def vector2Label(resultVector: BDV[Double]): Double = {
     val resultArray = resultVector.toArray.map{ x => math.round(x)}
@@ -80,51 +80,50 @@ private class NeuralNetworkGradient(val layers: Array[Int])
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector):
     (linalg.Vector, Double) = {
 
-    /* NB! weightArray, gradArray, errorArray have NULL zero element for addressing convenience */
-    val weightArray = new Array[BDM[Double]](layers.size)
+    /* NB! weightMarices, gradients, errors have NULL zero element for addressing convenience */
+    val weightMarices = new Array[BDM[Double]](layers.size)
     var offset = 0
     val weightsCopy = weights.toArray
     for(i <- 1 until layers.size){
-      weightArray(i) = new BDM[Double](layers(i), layers(i - 1), weightsCopy, offset)
+      weightMarices(i) = new BDM[Double](layers(i), layers(i - 1), weightsCopy, offset)
       offset += layers(i) * layers(i - 1)
     }
 
     /* neural network forward propagation */
-    val outArray = new Array[BDV[Double]](layers.size)
-    outArray(0) = data.toBreeze.toDenseVector
+    val outputs = new Array[BDV[Double]](layers.size)
+    outputs(0) = data.toBreeze.toDenseVector
     for(i <- 1 until layers.size) {
-      outArray(i) = weightArray(i) * outArray(i - 1)
-      Bsigmoid.inPlace(outArray(i))
+      outputs(i) = weightMarices(i) * outputs(i - 1)
+      Bsigmoid.inPlace(outputs(i))
     }
 
     /* error back propagation */
-    val errorArray = new Array[BDV[Double]](layers.size)
+    val errors = new Array[BDV[Double]](layers.size)
     val targetVector = label2Vector(label)
     for(i <- (layers.size - 1) until (0, -1)){
-      val onesVector = BDV.ones[Double](outArray(i).length)
-      val outPrime = ( onesVector :- outArray(i)) :* outArray(i)
+      val onesVector = BDV.ones[Double](outputs(i).length)
+      val outPrime = ( onesVector :- outputs(i)) :* outputs(i)
       if(i == layers.size - 1){
-        errorArray(i) = (targetVector :- outArray(i)) :* outPrime
+        errors(i) = (targetVector :- outputs(i)) :* outPrime
       }else{
-        errorArray(i) = (weightArray(i + 1).t * errorArray(i + 1)) :* outPrime
+        errors(i) = (weightMarices(i + 1).t * errors(i + 1)) :* outPrime
       }
     }
 
     /* gradient */
-    val gradArray = new Array[BDM[Double]](layers.size)
+    val gradients = new Array[BDM[Double]](layers.size)
     for(i <- (layers.size - 1) until (0, -1)) {
-      gradArray(i) = errorArray(i) * outArray(i - 1).t
+      gradients(i) = errors(i) * outputs(i - 1).t
     }
-    var gV = gradArray(1).toDenseVector
+    var gV = gradients(1).toDenseVector
     for(i <- 2 until layers.size) {
-      gV = BDV.vertcat(gV, gradArray(i).toDenseVector)
+      gV = BDV.vertcat(gV, gradients(i).toDenseVector)
     }
 
     /*  breeze error */
-    val deltaVector = targetVector :- outArray(layers.size - 1)
-    val be = Bsum(deltaVector :* deltaVector)
-
-    (Vectors.fromBreeze(gV), be)
+    val delta = targetVector :- outputs(layers.size - 1)
+    val outerError = Bsum(delta :* delta)
+    (Vectors.fromBreeze(gV), outerError)
   }
 
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector,
