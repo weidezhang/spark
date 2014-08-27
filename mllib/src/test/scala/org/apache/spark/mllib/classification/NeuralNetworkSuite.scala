@@ -47,32 +47,9 @@ class NeuralNetworkSuite extends FunSuite with LocalSparkContext {
 
   test("XOR classification") {
     val rddData = sc.parallelize(data, 2)
-    val predictor = NeuralNetwork.train(rddData, Array(hiddenSize), 1000, 1)
+    val predictor = NeuralNetwork.train(rddData, Array(hiddenSize), 1000, 0.7)
     val predictionAndLabels = rddData.map(lp => (predictor.predict(lp.features), lp.label)).collect()
     predictionAndLabels.foreach(x => assert(x._1 == x._2))
   }
 
-  test("Loss decreases") {
-    val sizes = Array(inputSize, hiddenSize, outputSize)
-    var size = 0
-    for(i <- 1 until sizes.size){
-      size += sizes(i - 1) * sizes(i)
-    }
-    val nn = new NeuralNetworkGradient(sizes)
-    var weights = Array.fill(size){random * (2.4 *2)- 2.4}
-    var previousError = Double.MaxValue
-    for(i <- 0 until 1000){
-      var error = 0.0
-      for(j <-0 until inputs.size){
-        val (gradient, loss) =
-          nn.compute(Vectors.dense(inputs(j)), outputs(j), Vectors.dense(weights))
-        weights = weights.zip(gradient.toArray).map{ case(x, y) => x + y }
-        error = loss
-      }
-      if(i % 100 == 0) {
-        assert(error < previousError)
-        previousError = error
-      }
-    }
-  }
 }

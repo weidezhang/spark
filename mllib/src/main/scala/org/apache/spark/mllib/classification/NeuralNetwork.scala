@@ -18,12 +18,12 @@
 package org.apache.spark.mllib.classification
 
 import scala.math._
-import breeze.linalg.{axpy => brzAxpy, Vector => BV, DenseVector => BDV, DenseMatrix => BDM, sum => Bsum}
+import breeze.linalg.{axpy => brzAxpy, Vector => BV, DenseVector => BDV, DenseMatrix => BDM, sum => Bsum, norm => Bnorm}
 import breeze.numerics.{sigmoid => Bsigmoid, round => Bround}
 import breeze.generic._
 import org.apache.spark.mllib.linalg
-import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.optimization.{Updater, GradientDescent, Gradient}
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.optimization.{SimpleUpdater, Updater, GradientDescent, Gradient}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 import org.apache.spark.mllib.linalg.BLAS.{axpy}
@@ -73,8 +73,9 @@ private class NeuralNetworkGradient(val layers: Array[Int])
 
   override def resultCount = layers.last
 
-  private lazy val weightCount =
-    (for(i <- 1 until layers.size) yield layers(i - 1) * layers(i)).sum
+  val weightCount =
+    (for(i <- 1 until layers.size) yield (layers(i) * layers(i - 1))).sum +
+      layers.sum - layers(0)
 
 
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector):
@@ -88,12 +89,17 @@ private class NeuralNetworkGradient(val layers: Array[Int])
       weightMarices(i) = new BDM[Double](layers(i), layers(i - 1), weightsCopy, offset)
       offset += layers(i) * layers(i - 1)
     }
+    val bias = new Array[BDV[Double]](layers.size)
+    for(i <- 1 until layers.size){
+      bias(i) = new BDV[Double](weightsCopy, offset, 1, layers(i))
+      offset += layers(i)
+    }
 
     /* neural network forward propagation */
     val outputs = new Array[BDV[Double]](layers.size)
     outputs(0) = data.toBreeze.toDenseVector
     for(i <- 1 until layers.size) {
-      outputs(i) = weightMarices(i) * outputs(i - 1)
+      outputs(i) = weightMarices(i) * outputs(i - 1) :+ bias(i)
       Bsigmoid.inPlace(outputs(i))
     }
 
@@ -102,9 +108,9 @@ private class NeuralNetworkGradient(val layers: Array[Int])
     val targetVector = label2Vector(label)
     for(i <- (layers.size - 1) until (0, -1)){
       val onesVector = BDV.ones[Double](outputs(i).length)
-      val outPrime = ( onesVector :- outputs(i)) :* outputs(i)
+      val outPrime = (onesVector :- outputs(i)) :* outputs(i)
       if(i == layers.size - 1){
-        errors(i) = (targetVector :- outputs(i)) :* outPrime
+        errors(i) = (outputs(i) :- targetVector) :* outPrime
       }else{
         errors(i) = (weightMarices(i + 1).t * errors(i + 1)) :* outPrime
       }
@@ -119,10 +125,14 @@ private class NeuralNetworkGradient(val layers: Array[Int])
     for(i <- 2 until layers.size) {
       gV = BDV.vertcat(gV, gradients(i).toDenseVector)
     }
+    for(i <- 1 until layers.size){
+      gV = BDV.vertcat(gV, errors(i))
+    }
 
     /*  breeze error */
     val delta = targetVector :- outputs(layers.size - 1)
     val outerError = Bsum(delta :* delta)
+
     (Vectors.fromBreeze(gV), outerError)
   }
 
@@ -134,7 +144,17 @@ private class NeuralNetworkGradient(val layers: Array[Int])
     loss
   }
 
-  def initialWeights = Vectors.dense(Array.fill(weightCount){random * (2.4 *2)- 2.4})
+  def initialWeights = Vectors.dense(Array.fill(weightCount){random * (2.4 * 2) - 2.4})
+}
+
+private class GradientUpdater extends Updater {
+  override def compute(weightsOld: linalg.Vector, gradient: linalg.Vector,
+                       stepSize: Double, iter: Int, regParam: Double): (linalg.Vector, Double) = {
+    //println("Step:" + iter + " norm:" + Bnorm(gradient.toBreeze.toDenseVector))
+    val brzWeights: BV[Double] = weightsOld.toBreeze.toDenseVector
+    brzAxpy(-stepSize, gradient.toBreeze, brzWeights)
+    (Vectors.fromBreeze(brzWeights), 0)
+  }
 }
 
 /**
@@ -162,6 +182,11 @@ class NeuralNetworkModel(val layers: Array[Int], val weights: linalg.Vector)
     weightArray(i) = new BDM[Double](layers(i), layers(i - 1), weightsCopy, offset)
     offset += layers(i) * layers(i - 1)
   }
+  private val bias = new Array[BDV[Double]](layers.size)
+  for(i <- 1 until layers.size){
+    bias(i) = new BDV[Double](weightsCopy, offset, 1, layers(i))
+    offset += layers(i)
+  }
 
   override def predict(testData: RDD[linalg.Vector]): RDD[Double] = {
     testData.map(predict(_))
@@ -172,7 +197,7 @@ class NeuralNetworkModel(val layers: Array[Int], val weights: linalg.Vector)
     val outArray = new Array[BDV[Double]](layers.size)
     outArray(0) = testData.toBreeze.toDenseVector
     for(i <- 1 until layers.size) {
-      outArray(i) = weightArray(i) * outArray(i - 1)
+      outArray(i) = weightArray(i) * outArray(i - 1) :+ bias(i)
       Bsigmoid.inPlace(outArray(i))
     }
     vector2Label(outArray(layers.size - 1))
@@ -205,16 +230,6 @@ class NeuralNetwork private (hiddenLayers: Array[Int], numIterations: Int, learn
   }
 }
 
-private class GradientUpdater extends Updater {
-  override def compute(weightsOld: linalg.Vector, gradient: linalg.Vector,
-                       stepSize: Double, iter: Int, regParam: Double): (linalg.Vector, Double) = {
-    //println("Step:" + iter)
-    val brzWeights: BV[Double] = weightsOld.toBreeze.toDenseVector
-    brzAxpy(stepSize, gradient.toBreeze, brzWeights)
-    (Vectors.fromBreeze(brzWeights), 0)
-  }
-}
-
 /**
  * ::Experimental::
  * Fabric for Neural Network classifier
@@ -244,7 +259,7 @@ object NeuralNetwork {
    * @param hiddenLayers array of hidden layers sizes
    */
   def train(data: RDD[LabeledPoint], hiddenLayers: Array[Int]) : NeuralNetworkModel = {
-    train(data, hiddenLayers, 1000, 0.9)
+    train(data, hiddenLayers, 1000, 0.3)
   }
 
   /**
@@ -255,6 +270,6 @@ object NeuralNetwork {
    * @param data RDD of `(label, array of features)` pairs.
    */
   def train(data: RDD[LabeledPoint]) : NeuralNetworkModel = {
-    train(data, Array(0), 1000, 0.9)
+    train(data, Array(0), 1000, 0.3)
   }
 }
