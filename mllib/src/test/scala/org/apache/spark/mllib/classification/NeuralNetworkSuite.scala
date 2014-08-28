@@ -51,5 +51,4 @@ class NeuralNetworkSuite extends FunSuite with LocalSparkContext {
     val predictionAndLabels = rddData.map(lp => (predictor.predict(lp.features), lp.label)).collect()
     predictionAndLabels.foreach(x => assert(x._1 == x._2))
   }
-
 }
