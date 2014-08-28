@@ -47,7 +47,7 @@ class NeuralNetworkSuite extends FunSuite with LocalSparkContext {
 
   test("XOR classification") {
     val rddData = sc.parallelize(data, 2)
-    val predictor = NeuralNetwork.train(rddData, Array(hiddenSize), 1000, 0.7)
+    val predictor = NeuralNetworkClassifier.train(rddData, Array(hiddenSize), 1000, 0.7)
     val predictionAndLabels = rddData.map(lp => (predictor.predict(lp.features), lp.label)).collect()
     predictionAndLabels.foreach(x => assert(x._1 == x._2))
   }
