@@ -59,14 +59,19 @@ private[classification] trait NeuralHelper {
 
   protected def rollWeights(weightMatricesUpdate: Array[BDM[Double]],
                             biasUpdate: Array[BDV[Double]]) = {
-    var weightsUpdate = weightMatricesUpdate(1).toDenseVector
-    for(i <- 2 until layers.size) {
-      weightsUpdate = BDV.vertcat(weightsUpdate, weightMatricesUpdate(i).toDenseVector)
+    var wu = BDV.zeros[Double](weightCount)
+    var offset = 0
+    for(i <- 1 until layers.size){
+      for(j <- 0 until weightMatricesUpdate(i).cols){
+        wu(offset until (offset + weightMatricesUpdate(i).rows)) := weightMatricesUpdate(i)(::, j)
+        offset += weightMatricesUpdate(i).rows
+      }
     }
     for(i <- 1 until layers.size){
-      weightsUpdate = BDV.vertcat(weightsUpdate, biasUpdate(i))
+      wu(offset until offset + layers(i)) := biasUpdate(i)
+      offset += layers(i)
     }
-    weightsUpdate
+    wu
   }
 
   protected def forwardRun(data: BDV[Double], weightMatrices: Array[BDM[Double]],
