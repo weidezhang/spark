@@ -57,7 +57,8 @@ private[classification] trait NeuralHelper {
     (weightMatrices, bias)
   }
 
-  protected def rollWeights(weightMatricesUpdate: Array[BDM[Double]], biasUpdate: Array[BDV[Double]]) = {
+  protected def rollWeights(weightMatricesUpdate: Array[BDM[Double]],
+                            biasUpdate: Array[BDV[Double]]) = {
     var weightsUpdate = weightMatricesUpdate(1).toDenseVector
     for(i <- 2 until layers.size) {
       weightsUpdate = BDV.vertcat(weightsUpdate, weightMatricesUpdate(i).toDenseVector)
@@ -146,8 +147,8 @@ private[classification] trait LabelConverter {
   protected def vector2Label(resultVector: BDV[Double]): Double = {
     require(resultVector.length == resultCount ||
       (resultVector.length == 1 && resultCount == 2))
-    if(resultCount == 2) index2Label(round(resultVector(0)).toInt) else
-      index2Label(Bargmax(resultVector))
+    if(resultCount == 2) { index2Label(round(resultVector(0)).toInt) } else
+    { index2Label(Bargmax(resultVector)) }
   }
 }
 
@@ -156,7 +157,8 @@ private class NeuralNetworkClassifierGradient(val layers: Array[Int], val labels
 
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector):
     (linalg.Vector, Double) = {
-    /* NB! weightMarices, gradientMatrices, errors have NULL zero element for addressing convenience */
+    /* NB! weightMarices, gradientMatrices, errors have NULL zero
+     * element for addressing convenience */
     val (weightMatrices, bias) = unrollWeights(weights)
     /* forward run */
     val outputs = forwardRun(data.toBreeze.toDenseVector, weightMatrices, bias)
@@ -185,15 +187,16 @@ private class NeuralNetworkGradient(val layers: Array[Int], val targetIndex: Int
 
   override def compute(data: linalg.Vector, label: Double, weights: linalg.Vector):
   (linalg.Vector, Double) = {
-    /* NB! weightMarices, gradientMatrices, errors have NULL zero element for addressing convenience */
+    /* NB! weightMarices, gradientMatrices, errors have NULL zero
+     * element for addressing convenience */
     val (weightMatrices, bias) = unrollWeights(weights)
     /* forward run */
     val dataArray = data.toArray
     /* input == 0 for Autoencoder case */
-    val input = if(targetIndex == 0) data.toBreeze.toDenseVector else
-      new BDV[Double](dataArray, 0, 1, targetIndex)
-    val targetVector = if(targetIndex == 0) input else
-      new BDV[Double](dataArray, targetIndex)
+    val input = if(targetIndex == 0) { data.toBreeze.toDenseVector } else
+    { new BDV[Double](dataArray, 0, 1, targetIndex) }
+    val targetVector = if(targetIndex == 0) { input } else
+    { new BDV[Double](dataArray, targetIndex) }
     val outputs = forwardRun(input, weightMatrices, bias)
     /* error back propagation */
     val (gradientMatrices, errors) = wGradient(weightMatrices, targetVector, outputs)
@@ -238,7 +241,8 @@ private class GradientUpdater extends Updater {
  * + ... + hidden(N)*output
  */
 @Experimental
-class NeuralNetworkClassifierModel(val layers: Array[Int], val weights: linalg.Vector, val labels: Set[Double])
+class NeuralNetworkClassifierModel(val layers: Array[Int], val weights: linalg.Vector,
+                                   val labels: Set[Double])
   extends ClassificationModel with LabelConverter with NeuralHelper with Serializable {
 
   private val (weightArray, bias) = unrollWeights(weights)
@@ -256,7 +260,8 @@ class NeuralNetworkClassifierModel(val layers: Array[Int], val weights: linalg.V
 class NeuralNetworkModel(val layers: Array[Int], val weights: linalg.Vector)
   extends NeuralHelper with Serializable {
   private val (weightArray, bias) = unrollWeights(weights)
-  def propagate(data: linalg.Vector): Array[BDV[Double]] = forwardRun(data.toBreeze.toDenseVector, weightArray, bias)
+  def propagate(data: linalg.Vector): Array[BDV[Double]] =
+    forwardRun(data.toBreeze.toDenseVector, weightArray, bias)
 }
 
 
@@ -266,7 +271,8 @@ class NeuralNetworkModel(val layers: Array[Int], val weights: linalg.Vector)
  * NOTE: labels should represent the class index
  */
 @Experimental
-class NeuralNetworkClassifier private (hiddenLayers: Array[Int], numIterations: Int, learningRate: Double)
+class NeuralNetworkClassifier private (hiddenLayers: Array[Int],
+                                       numIterations: Int, learningRate: Double)
   extends Serializable {
 
   def run(data: RDD[LabeledPoint]) = {
@@ -348,7 +354,8 @@ class NeuralNetwork private (hiddenLayers: Array[Int], numIterations: Int, learn
     val gradientDescent = new GradientDescent(gradient, updater)
     gradientDescent.setNumIterations(numIterations).setStepSize(learningRate)
     val tupleData = data.map{ case(in, out) =>
-      (0.0, Vectors.fromBreeze(BDV.vertcat(in.toBreeze.toDenseVector, out.toBreeze.toDenseVector)))}
+      (0.0,
+        Vectors.fromBreeze(BDV.vertcat(in.toBreeze.toDenseVector, out.toBreeze.toDenseVector)))}
     val weights = gradientDescent.optimize(tupleData, gradient.initialWeights)
     new NeuralNetworkModel(layers, weights)
   }
@@ -382,7 +389,8 @@ object NeuralNetwork {
    * @param data RDD of `(input, output)` pairs.
    * @param hiddenLayers array of hidden layers sizes
    */
-  def train(data: RDD[(linalg.Vector, linalg.Vector)], hiddenLayers: Array[Int]) : NeuralNetworkModel = {
+  def train(data: RDD[(linalg.Vector, linalg.Vector)],
+            hiddenLayers: Array[Int]) : NeuralNetworkModel = {
     train(data, hiddenLayers, 1000, 0.3)
   }
 
