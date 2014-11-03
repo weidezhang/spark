@@ -22,6 +22,7 @@ import java.io.File
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, FileSystem, Path}
 import org.apache.hadoop.mapreduce.Job
+import org.apache.spark.sql.test.TestSQLContext
 
 import parquet.example.data.{GroupWriter, Group}
 import parquet.example.data.simple.SimpleGroup
@@ -58,7 +59,7 @@ private[sql] object ParquetTestData {
     """message myrecord {
       optional boolean myboolean;
       optional int32 myint;
-      optional binary mystring;
+      optional binary mystring (UTF8);
       optional int64 mylong;
       optional float myfloat;
       optional double mydouble;
@@ -87,10 +88,16 @@ private[sql] object ParquetTestData {
       message myrecord {
       required boolean myboolean;
       required int32 myint;
-      required binary mystring;
+      required binary mystring (UTF8);
       required int64 mylong;
       required float myfloat;
       required double mydouble;
+      optional boolean myoptboolean;
+      optional int32 myoptint;
+      optional binary myoptstring (UTF8);
+      optional int64 myoptlong;
+      optional float myoptfloat;
+      optional double myoptdouble;
       }
     """
 
@@ -103,7 +110,7 @@ private[sql] object ParquetTestData {
   val testDir = Utils.createTempDir()
   val testFilterDir = Utils.createTempDir()
 
-  lazy val testData = new ParquetRelation(testDir.toURI.toString)
+  lazy val testData = new ParquetRelation(testDir.toURI.toString, None, TestSQLContext)
 
   val testNestedSchema1 =
     // based on blogpost example, source:
@@ -119,14 +126,14 @@ private[sql] object ParquetTestData {
     // so that array types can be translated correctly.
     """
       message AddressBook {
-        required binary owner;
+        required binary owner (UTF8);
         optional group ownerPhoneNumbers {
-          repeated binary array;
+          repeated binary array (UTF8);
         }
         optional group contacts {
           repeated group array {
-            required binary name;
-            optional binary phoneNumber;
+            required binary name (UTF8);
+            optional binary phoneNumber (UTF8);
           }
         }
       }
@@ -181,16 +188,16 @@ private[sql] object ParquetTestData {
         required int32 x;
         optional group data1 {
           repeated group map {
-            required binary key;
+            required binary key (UTF8);
             required int32 value;
           }
         }
         required group data2 {
           repeated group map {
-            required binary key;
+            required binary key (UTF8);
             required group value {
               required int64 payload1;
-              optional binary payload2;
+              optional binary payload2 (UTF8);
             }
           }
         }
@@ -202,8 +209,10 @@ private[sql] object ParquetTestData {
   val testNestedDir3 = Utils.createTempDir()
   val testNestedDir4 = Utils.createTempDir()
 
-  lazy val testNestedData1 = new ParquetRelation(testNestedDir1.toURI.toString)
-  lazy val testNestedData2 = new ParquetRelation(testNestedDir2.toURI.toString)
+  lazy val testNestedData1 =
+    new ParquetRelation(testNestedDir1.toURI.toString, None, TestSQLContext)
+  lazy val testNestedData2 =
+    new ParquetRelation(testNestedDir2.toURI.toString, None, TestSQLContext)
 
   def writeFile() = {
     testDir.delete()
@@ -252,6 +261,19 @@ private[sql] object ParquetTestData {
       record.add(3, i.toLong)
       record.add(4, i.toFloat + 0.5f)
       record.add(5, i.toDouble + 0.5d)
+      if (i % 2 == 0) {
+        if (i % 3 == 0) {
+          record.add(6, true)
+        } else {
+          record.add(6, false)
+        }
+        record.add(7, i)
+        record.add(8, i.toString)
+        record.add(9, i.toLong)
+        record.add(10, i.toFloat + 0.5f)
+        record.add(11, i.toDouble + 0.5d)
+      }
+ 
       writer.write(record)
     }
     writer.close()

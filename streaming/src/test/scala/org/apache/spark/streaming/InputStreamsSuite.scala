@@ -18,8 +18,6 @@
 package org.apache.spark.streaming
 
 import akka.actor.Actor
-import akka.actor.IO
-import akka.actor.IOManager
 import akka.actor.Props
 import akka.util.ByteString
 
@@ -29,7 +27,7 @@ import java.nio.charset.Charset
 import java.util.concurrent.{Executors, TimeUnit, ArrayBlockingQueue}
 import java.util.concurrent.atomic.AtomicInteger
 
-import scala.collection.mutable.{SynchronizedBuffer, ArrayBuffer}
+import scala.collection.mutable.{SynchronizedBuffer, ArrayBuffer, SynchronizedQueue}
 
 import com.google.common.io.Files
 import org.scalatest.BeforeAndAfter
@@ -39,6 +37,7 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.util.ManualClock
 import org.apache.spark.util.Utils
 import org.apache.spark.streaming.receiver.{ActorHelper, Receiver}
+import org.apache.spark.rdd.RDD
 
 class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
 
@@ -97,8 +96,7 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
     conf.set("spark.streaming.clock", "org.apache.spark.streaming.util.SystemClock")
 
     // Set up the streaming context and input streams
-    val testDir = Files.createTempDir()
-    testDir.deleteOnExit()
+    val testDir = Utils.createTempDir()
     val ssc = new StreamingContext(conf, batchDuration)
     val fileStream = ssc.textFileStream(testDir.toString)
     val outputBuffer = new ArrayBuffer[Seq[String]] with SynchronizedBuffer[Seq[String]]
@@ -143,59 +141,6 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
     conf.set("spark.streaming.clock", "org.apache.spark.streaming.util.ManualClock")
   }
 
-  // TODO: This test works in IntelliJ but not through SBT
-  ignore("actor input stream") {
-    // Start the server
-    val testServer = new TestServer()
-    val port = testServer.port
-    testServer.start()
-
-    // Set up the streaming context and input streams
-    val ssc = new StreamingContext(conf, batchDuration)
-    val networkStream = ssc.actorStream[String](Props(new TestActor(port)), "TestActor",
-      // Had to pass the local value of port to prevent from closing over entire scope
-      StorageLevel.MEMORY_AND_DISK)
-    val outputBuffer = new ArrayBuffer[Seq[String]] with SynchronizedBuffer[Seq[String]]
-    val outputStream = new TestOutputStream(networkStream, outputBuffer)
-    def output = outputBuffer.flatMap(x => x)
-    outputStream.register()
-    ssc.start()
-
-    // Feed data to the server to send to the network receiver
-    val clock = ssc.scheduler.clock.asInstanceOf[ManualClock]
-    val input = 1 to 9
-    val expectedOutput = input.map(x => x.toString)
-    Thread.sleep(1000)
-    for (i <- 0 until input.size) {
-      testServer.send(input(i).toString)
-      Thread.sleep(500)
-      clock.addToTime(batchDuration.milliseconds)
-    }
-    Thread.sleep(1000)
-    logInfo("Stopping server")
-    testServer.stop()
-    logInfo("Stopping context")
-    ssc.stop()
-
-    // Verify whether data received was as expected
-    logInfo("--------------------------------")
-    logInfo("output.size = " + outputBuffer.size)
-    logInfo("output")
-    outputBuffer.foreach(x => logInfo("[" + x.mkString(",") + "]"))
-    logInfo("expected output.size = " + expectedOutput.size)
-    logInfo("expected output")
-    expectedOutput.foreach(x => logInfo("[" + x.mkString(",") + "]"))
-    logInfo("--------------------------------")
-
-    // Verify whether all the elements received are as expected
-    // (whether the elements were received one in each interval is not verified)
-    assert(output.size === expectedOutput.size)
-    for (i <- 0 until output.size) {
-      assert(output(i) === expectedOutput(i))
-    }
-  }
-
-
   test("multi-thread receiver") {
     // set up the test receiver
     val numThreads = 10
@@ -233,6 +178,95 @@ class InputStreamsSuite extends TestSuiteBase with BeforeAndAfter {
     outputBuffer.foreach(x => logInfo("[" + x.mkString(",") + "]"))
     logInfo("--------------------------------")
     assert(output.sum === numTotalRecords)
+  }
+
+  test("queue input stream - oneAtATime=true") {
+    // Set up the streaming context and input streams
+    val ssc = new StreamingContext(conf, batchDuration)
+    val queue = new SynchronizedQueue[RDD[String]]()
+    val queueStream = ssc.queueStream(queue, oneAtATime = true)
+    val outputBuffer = new ArrayBuffer[Seq[String]] with SynchronizedBuffer[Seq[String]]
+    val outputStream = new TestOutputStream(queueStream, outputBuffer)
+    def output = outputBuffer.filter(_.size > 0)
+    outputStream.register()
+    ssc.start()
+
+    // Setup data queued into the stream
+    val clock = ssc.scheduler.clock.asInstanceOf[ManualClock]
+    val input = Seq("1", "2", "3", "4", "5")
+    val expectedOutput = input.map(Seq(_))
+    //Thread.sleep(1000)
+    val inputIterator = input.toIterator
+    for (i <- 0 until input.size) {
+      // Enqueue more than 1 item per tick but they should dequeue one at a time
+      inputIterator.take(2).foreach(i => queue += ssc.sparkContext.makeRDD(Seq(i)))
+      clock.addToTime(batchDuration.milliseconds)
+    }
+    Thread.sleep(1000)
+    logInfo("Stopping context")
+    ssc.stop()
+
+    // Verify whether data received was as expected
+    logInfo("--------------------------------")
+    logInfo("output.size = " + outputBuffer.size)
+    logInfo("output")
+    outputBuffer.foreach(x => logInfo("[" + x.mkString(",") + "]"))
+    logInfo("expected output.size = " + expectedOutput.size)
+    logInfo("expected output")
+    expectedOutput.foreach(x => logInfo("[" + x.mkString(",") + "]"))
+    logInfo("--------------------------------")
+
+    // Verify whether all the elements received are as expected
+    assert(output.size === expectedOutput.size)
+    for (i <- 0 until output.size) {
+      assert(output(i) === expectedOutput(i))
+    }
+  }
+
+  test("queue input stream - oneAtATime=false") {
+    // Set up the streaming context and input streams
+    val ssc = new StreamingContext(conf, batchDuration)
+    val queue = new SynchronizedQueue[RDD[String]]()
+    val queueStream = ssc.queueStream(queue, oneAtATime = false)
+    val outputBuffer = new ArrayBuffer[Seq[String]] with SynchronizedBuffer[Seq[String]]
+    val outputStream = new TestOutputStream(queueStream, outputBuffer)
+    def output = outputBuffer.filter(_.size > 0)
+    outputStream.register()
+    ssc.start()
+
+    // Setup data queued into the stream
+    val clock = ssc.scheduler.clock.asInstanceOf[ManualClock]
+    val input = Seq("1", "2", "3", "4", "5")
+    val expectedOutput = Seq(Seq("1", "2", "3"), Seq("4", "5"))
+
+    // Enqueue the first 3 items (one by one), they should be merged in the next batch
+    val inputIterator = input.toIterator
+    inputIterator.take(3).foreach(i => queue += ssc.sparkContext.makeRDD(Seq(i)))
+    clock.addToTime(batchDuration.milliseconds)
+    Thread.sleep(1000)
+
+    // Enqueue the remaining items (again one by one), merged in the final batch
+    inputIterator.foreach(i => queue += ssc.sparkContext.makeRDD(Seq(i)))
+    clock.addToTime(batchDuration.milliseconds)
+    Thread.sleep(1000)
+    logInfo("Stopping context")
+    ssc.stop()
+
+    // Verify whether data received was as expected
+    logInfo("--------------------------------")
+    logInfo("output.size = " + outputBuffer.size)
+    logInfo("output")
+    outputBuffer.foreach(x => logInfo("[" + x.mkString(",") + "]"))
+    logInfo("expected output.size = " + expectedOutput.size)
+    logInfo("expected output")
+    expectedOutput.foreach(x => logInfo("[" + x.mkString(",") + "]"))
+    logInfo("--------------------------------")
+
+    // Verify whether all the elements received are as expected
+    assert(output.size === expectedOutput.size)
+    for (i <- 0 until output.size) {
+      assert(output(i) === expectedOutput(i))
+    }
   }
 }
 
@@ -286,19 +320,6 @@ class TestServer(portToBind: Int = 0) extends Logging {
   def stop() { servingThread.interrupt() }
 
   def port = serverSocket.getLocalPort
-}
-
-/** This is an actor for testing actor input stream */
-class TestActor(port: Int) extends Actor with ActorHelper {
-
-  def bytesToString(byteString: ByteString) = byteString.utf8String
-
-  override def preStart = IOManager(context.system).connect(new InetSocketAddress(port))
-
-  def receive = {
-    case IO.Read(socket, bytes) =>
-      store(bytesToString(bytes))
-  }
 }
 
 /** This is a receiver to test multiple threads inserting data using block generator */

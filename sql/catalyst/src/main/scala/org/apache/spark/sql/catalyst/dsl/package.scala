@@ -17,7 +17,9 @@
 
 package org.apache.spark.sql.catalyst
 
-import java.sql.Timestamp
+import java.sql.{Date, Timestamp}
+
+import org.apache.spark.sql.catalyst.types.decimal.Decimal
 
 import scala.language.implicitConversions
 
@@ -62,12 +64,16 @@ package object dsl {
 
     def unary_- = UnaryMinus(expr)
     def unary_! = Not(expr)
+    def unary_~ = BitwiseNot(expr)
 
     def + (other: Expression) = Add(expr, other)
     def - (other: Expression) = Subtract(expr, other)
     def * (other: Expression) = Multiply(expr, other)
     def / (other: Expression) = Divide(expr, other)
     def % (other: Expression) = Remainder(expr, other)
+    def & (other: Expression) = BitwiseAnd(expr, other)
+    def | (other: Expression) = BitwiseOr(expr, other)
+    def ^ (other: Expression) = BitwiseXor(expr, other)
 
     def && (other: Expression) = And(expr, other)
     def || (other: Expression) = Or(expr, other)
@@ -77,10 +83,27 @@ package object dsl {
     def > (other: Expression) = GreaterThan(expr, other)
     def >= (other: Expression) = GreaterThanOrEqual(expr, other)
     def === (other: Expression) = EqualTo(expr, other)
+    def <=> (other: Expression) = EqualNullSafe(expr, other)
     def !== (other: Expression) = Not(EqualTo(expr, other))
+
+    def in(list: Expression*) = In(expr, list)
 
     def like(other: Expression) = Like(expr, other)
     def rlike(other: Expression) = RLike(expr, other)
+    def contains(other: Expression) = Contains(expr, other)
+    def startsWith(other: Expression) = StartsWith(expr, other)
+    def endsWith(other: Expression) = EndsWith(expr, other)
+    def substr(pos: Expression, len: Expression = Literal(Int.MaxValue)) =
+      Substring(expr, pos, len)
+    def substring(pos: Expression, len: Expression = Literal(Int.MaxValue)) =
+      Substring(expr, pos, len)
+
+    def isNull = IsNull(expr)
+    def isNotNull = IsNotNull(expr)
+
+    def getItem(ordinal: Expression) = GetItem(expr, ordinal)
+    def getField(fieldName: String) = GetField(expr, fieldName)
+
     def cast(to: DataType) = Cast(expr, to)
 
     def asc = SortOrder(expr, Ascending)
@@ -102,11 +125,26 @@ package object dsl {
     implicit def floatToLiteral(f: Float) = Literal(f)
     implicit def doubleToLiteral(d: Double) = Literal(d)
     implicit def stringToLiteral(s: String) = Literal(s)
-    implicit def decimalToLiteral(d: BigDecimal) = Literal(d)
+    implicit def dateToLiteral(d: Date) = Literal(d)
+    implicit def bigDecimalToLiteral(d: BigDecimal) = Literal(d)
+    implicit def decimalToLiteral(d: Decimal) = Literal(d)
     implicit def timestampToLiteral(t: Timestamp) = Literal(t)
     implicit def binaryToLiteral(a: Array[Byte]) = Literal(a)
 
     implicit def symbolToUnresolvedAttribute(s: Symbol) = analysis.UnresolvedAttribute(s.name)
+
+    def sum(e: Expression) = Sum(e)
+    def sumDistinct(e: Expression) = SumDistinct(e)
+    def count(e: Expression) = Count(e)
+    def countDistinct(e: Expression*) = CountDistinct(e)
+    def approxCountDistinct(e: Expression, rsd: Double = 0.05) = ApproxCountDistinct(e, rsd)
+    def avg(e: Expression) = Average(e)
+    def first(e: Expression) = First(e)
+    def last(e: Expression) = Last(e)
+    def min(e: Expression) = Min(e)
+    def max(e: Expression) = Max(e)
+    def upper(e: Expression) = Upper(e)
+    def lower(e: Expression) = Lower(e)
 
     implicit class DslSymbol(sym: Symbol) extends ImplicitAttribute { def s = sym.name }
     // TODO more implicit class for literal?
@@ -144,14 +182,33 @@ package object dsl {
       /** Creates a new AttributeReference of type string */
       def string = AttributeReference(s, StringType, nullable = true)()
 
+      /** Creates a new AttributeReference of type date */
+      def date = AttributeReference(s, DateType, nullable = true)()
+
       /** Creates a new AttributeReference of type decimal */
-      def decimal = AttributeReference(s, DecimalType, nullable = true)()
+      def decimal = AttributeReference(s, DecimalType.Unlimited, nullable = true)()
+
+      /** Creates a new AttributeReference of type decimal */
+      def decimal(precision: Int, scale: Int) =
+        AttributeReference(s, DecimalType(precision, scale), nullable = true)()
 
       /** Creates a new AttributeReference of type timestamp */
       def timestamp = AttributeReference(s, TimestampType, nullable = true)()
 
       /** Creates a new AttributeReference of type binary */
       def binary = AttributeReference(s, BinaryType, nullable = true)()
+
+      /** Creates a new AttributeReference of type array */
+      def array(dataType: DataType) = AttributeReference(s, ArrayType(dataType), nullable = true)()
+
+      /** Creates a new AttributeReference of type map */
+      def map(keyType: DataType, valueType: DataType): AttributeReference =
+        map(MapType(keyType, valueType))
+      def map(mapType: MapType) = AttributeReference(s, mapType, nullable = true)()
+
+      /** Creates a new AttributeReference of type struct */
+      def struct(fields: StructField*): AttributeReference = struct(StructType(fields))
+      def struct(structType: StructType) = AttributeReference(s, structType, nullable = true)()
     }
 
     implicit class DslAttribute(a: AttributeReference) {
@@ -161,7 +218,7 @@ package object dsl {
       // Protobuf terminology
       def required = a.withNullability(false)
 
-      def at(ordinal: Int) = BoundReference(ordinal, a)
+      def at(ordinal: Int) = BoundReference(ordinal, a.dataType, a.nullable)
     }
   }
 

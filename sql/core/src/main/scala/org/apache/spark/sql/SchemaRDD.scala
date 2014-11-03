@@ -17,20 +17,24 @@
 
 package org.apache.spark.sql
 
+import java.util.{List => JList}
+
+import scala.collection.JavaConversions._
+
 import net.razorvine.pickle.Pickler
 
 import org.apache.spark.{Dependency, OneToOneDependency, Partition, Partitioner, TaskContext}
 import org.apache.spark.annotation.{AlphaComponent, Experimental}
+import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.api.java.JavaSchemaRDD
+import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.catalyst.analysis._
 import org.apache.spark.sql.catalyst.expressions._
-import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.plans.{Inner, JoinType}
-import org.apache.spark.sql.catalyst.types.{DataType, StructType, BooleanType}
-import org.apache.spark.sql.execution.{ExistingRdd, SparkLogicalPlan}
-import org.apache.spark.api.java.JavaRDD
-import java.util.{Map => JMap}
+import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.execution.{LogicalRDD, EvaluatePython}
+import org.apache.spark.storage.StorageLevel
 
 /**
  * :: AlphaComponent ::
@@ -42,9 +46,8 @@ import java.util.{Map => JMap}
  * explicitly using the `createSchemaRDD` function on a [[SQLContext]].
  *
  * A `SchemaRDD` can also be created by loading data in from external sources.
- * Examples are loading data from Parquet files by using by using the
- * `parquetFile` method on [[SQLContext]], and loading JSON datasets
- * by using `jsonFile` and `jsonRDD` methods on [[SQLContext]].
+ * Examples are loading data from Parquet files by using the `parquetFile` method on [[SQLContext]]
+ * and loading JSON datasets by using `jsonFile` and `jsonRDD` methods on [[SQLContext]].
  *
  * == SQL Queries ==
  * A SchemaRDD can be registered as a table in the [[SQLContext]] that was used to create it.  Once
@@ -64,7 +67,7 @@ import java.util.{Map => JMap}
  *  val rdd = sc.parallelize((1 to 100).map(i => Record(i, s"val_$i")))
  *  // Any RDD containing case classes can be registered as a table.  The schema of the table is
  *  // automatically inferred using scala reflection.
- *  rdd.registerAsTable("records")
+ *  rdd.registerTempTable("records")
  *
  *  val results: SchemaRDD = sql("SELECT * FROM records")
  * }}}
@@ -109,13 +112,22 @@ class SchemaRDD(
   // =========================================================================================
 
   override def compute(split: Partition, context: TaskContext): Iterator[Row] =
-    firstParent[Row].compute(split, context).map(_.copy())
+    firstParent[Row].compute(split, context).map(ScalaReflection.convertRowToScala(_, this.schema))
 
   override def getPartitions: Array[Partition] = firstParent[Row].partitions
 
-  override protected def getDependencies: Seq[Dependency[_]] =
-    List(new OneToOneDependency(queryExecution.toRdd))
+  override protected def getDependencies: Seq[Dependency[_]] = {
+    schema // Force reification of the schema so it is available on executors.
 
+    List(new OneToOneDependency(queryExecution.toRdd))
+  }
+
+  /**
+   * Returns the schema of this SchemaRDD (represented by a [[StructType]]).
+   *
+   * @group schema
+   */
+  lazy val schema: StructType = queryExecution.analyzed.schema
 
   // =======================================================================
   // Query DSL
@@ -133,8 +145,13 @@ class SchemaRDD(
    *
    * @group Query
    */
-  def select(exprs: NamedExpression*): SchemaRDD =
-    new SchemaRDD(sqlContext, Project(exprs, logicalPlan))
+  def select(exprs: Expression*): SchemaRDD = {
+    val aliases = exprs.zipWithIndex.map {
+      case (ne: NamedExpression, _) => ne
+      case (e, i) => Alias(e, s"c$i")()
+    }
+    new SchemaRDD(sqlContext, Project(aliases, logicalPlan))
+  }
 
   /**
    * Filters the output, only returning those rows where `condition` evaluates to true.
@@ -248,6 +265,26 @@ class SchemaRDD(
     new SchemaRDD(sqlContext, Union(logicalPlan, otherPlan.logicalPlan))
 
   /**
+   * Performs a relational except on two SchemaRDDs
+   *
+   * @param otherPlan the [[SchemaRDD]] that should be excepted from this one.
+   *
+   * @group Query
+   */
+  def except(otherPlan: SchemaRDD): SchemaRDD =
+    new SchemaRDD(sqlContext, Except(logicalPlan, otherPlan.logicalPlan))
+
+  /**
+   * Performs a relational intersect on two SchemaRDDs
+   *
+   * @param otherPlan the [[SchemaRDD]] that should be intersected with this one.
+   *
+   * @group Query
+   */
+  def intersect(otherPlan: SchemaRDD): SchemaRDD =
+    new SchemaRDD(sqlContext, Intersect(logicalPlan, otherPlan.logicalPlan))
+
+  /**
    * Filters tuples using a function over the value of the specified column.
    *
    * {{{
@@ -326,7 +363,7 @@ class SchemaRDD(
       join: Boolean = false,
       outer: Boolean = false,
       alias: Option[String] = None) =
-    new SchemaRDD(sqlContext, Generate(generator, join, outer, None, logicalPlan))
+    new SchemaRDD(sqlContext, Generate(generator, join, outer, alias, logicalPlan))
 
   /**
    * Returns this RDD as a SchemaRDD.  Intended primarily to force the invocation of the implicit
@@ -347,38 +384,25 @@ class SchemaRDD(
    * Converts a JavaRDD to a PythonRDD. It is used by pyspark.
    */
   private[sql] def javaToPython: JavaRDD[Array[Byte]] = {
-    def rowToMap(row: Row, structType: StructType): JMap[String, Any] = {
-      val fields = structType.fields.map(field => (field.name, field.dataType))
-      val map: JMap[String, Any] = new java.util.HashMap
-      row.zip(fields).foreach {
-        case (obj, (name, dataType)) =>
-          dataType match {
-            case struct: StructType => map.put(name, rowToMap(obj.asInstanceOf[Row], struct))
-            case other => map.put(name, obj)
-          }
-      }
-
-      map
-    }
-
-    // TODO: Actually, the schema of a row should be represented by a StructType instead of
-    // a Seq[Attribute]. Once we have finished that change, we can just use rowToMap to
-    // construct the Map for python.
-    val fields: Seq[(String, DataType)] = this.queryExecution.analyzed.output.map(
-      field => (field.name, field.dataType))
+    val fieldTypes = schema.fields.map(_.dataType)
     this.mapPartitions { iter =>
       val pickle = new Pickler
       iter.map { row =>
-        val map: JMap[String, Any] = new java.util.HashMap
-        row.zip(fields).foreach { case (obj, (name, dataType)) =>
-          dataType match {
-            case struct: StructType => map.put(name, rowToMap(obj.asInstanceOf[Row], struct))
-            case other => map.put(name, obj)
-          }
-        }
-        map
-      }.grouped(10).map(batched => pickle.dumps(batched.toArray))
+        EvaluatePython.rowToArray(row, fieldTypes)
+      }.grouped(100).map(batched => pickle.dumps(batched.toArray))
     }
+  }
+
+  /**
+   * Serializes the Array[Row] returned by SchemaRDD's optimized collect(), using the same
+   * format as javaToPython. It is used by pyspark.
+   */
+  private[sql] def collectToPython: JList[Array[Byte]] = {
+    val fieldTypes = schema.fields.map(_.dataType)
+    val pickle = new Pickler
+    new java.util.ArrayList(collect().map { row =>
+      EvaluatePython.rowToArray(row, fieldTypes)
+    }.grouped(100).map(batched => pickle.dumps(batched.toArray)).toIterable)
   }
 
   /**
@@ -390,11 +414,12 @@ class SchemaRDD(
    * @group schema
    */
   private def applySchema(rdd: RDD[Row]): SchemaRDD = {
-    new SchemaRDD(sqlContext, SparkLogicalPlan(ExistingRdd(logicalPlan.output, rdd)))
+    new SchemaRDD(sqlContext,
+      LogicalRDD(queryExecution.analyzed.output.map(_.newInstance()), rdd)(sqlContext))
   }
 
   // =======================================================================
-  // Overriden RDD actions
+  // Overridden RDD actions
   // =======================================================================
 
   override def collect(): Array[Row] = queryExecution.executedPlan.executeCollect()
@@ -444,4 +469,20 @@ class SchemaRDD(
   override def subtract(other: RDD[Row], p: Partitioner)
                        (implicit ord: Ordering[Row] = null): SchemaRDD =
     applySchema(super.subtract(other, p)(ord))
+
+  /** Overridden cache function will always use the in-memory columnar caching. */
+  override def cache(): this.type = {
+    sqlContext.cacheQuery(this)
+    this
+  }
+
+  override def persist(newLevel: StorageLevel): this.type = {
+    sqlContext.cacheQuery(this, newLevel)
+    this
+  }
+
+  override def unpersist(blocking: Boolean): this.type = {
+    sqlContext.uncacheQuery(this, blocking)
+    this
+  }
 }

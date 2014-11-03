@@ -45,7 +45,7 @@ private[spark] class HistoryPage(parent: HistoryServer) extends WebUIPage("") {
       <div class="row-fluid">
         <div class="span12">
           <ul class="unstyled">
-            { providerConfig.map(e => <li><strong>{e._1}:</strong> {e._2}</li>) }
+            {providerConfig.map { case (k, v) => <li><strong>{k}:</strong> {v}</li> }}
           </ul>
           {
             if (allApps.size > 0) {
@@ -67,6 +67,7 @@ private[spark] class HistoryPage(parent: HistoryServer) extends WebUIPage("") {
   }
 
   private val appHeader = Seq(
+    "App ID",
     "App Name",
     "Started",
     "Completed",
@@ -75,18 +76,19 @@ private[spark] class HistoryPage(parent: HistoryServer) extends WebUIPage("") {
     "Last Updated")
 
   private def appRow(info: ApplicationHistoryInfo): Seq[Node] = {
-    val uiAddress = "/history/" + info.id
+    val uiAddress = HistoryServer.UI_PATH_PREFIX + s"/${info.id}"
     val startTime = UIUtils.formatDate(info.startTime)
     val endTime = UIUtils.formatDate(info.endTime)
     val duration = UIUtils.formatDuration(info.endTime - info.startTime)
     val lastUpdated = UIUtils.formatDate(info.lastUpdated)
     <tr>
-      <td><a href={uiAddress}>{info.name}</a></td>
-      <td>{startTime}</td>
-      <td>{endTime}</td>
-      <td>{duration}</td>
+      <td><a href={uiAddress}>{info.id}</a></td>
+      <td>{info.name}</td>
+      <td sorttable_customkey={info.startTime.toString}>{startTime}</td>
+      <td sorttable_customkey={info.endTime.toString}>{endTime}</td>
+      <td sorttable_customkey={(info.endTime - info.startTime).toString}>{duration}</td>
       <td>{info.sparkUser}</td>
-      <td>{lastUpdated}</td>
+      <td sorttable_customkey={info.lastUpdated.toString}>{lastUpdated}</td>
     </tr>
   }
 }

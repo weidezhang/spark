@@ -51,6 +51,11 @@ table.sortable thead {
   cursor: pointer;
 }
 
+table.sortable td {
+  word-wrap: break-word;
+  max-width: 600px;
+}
+
 .progress {
   margin-bottom: 0px; position: relative
 }
@@ -81,7 +86,9 @@ table.sortable thead {
 
 span.kill-link {
   margin-right: 2px;
+  margin-left: 20px;
   color: gray;
+  float: right;
 }
 
 span.kill-link a {
@@ -111,4 +118,39 @@ pre {
   padding-top: 0;
   padding-bottom: 0;
   border: none;
+}
+
+span.expand-additional-metrics {
+  cursor: pointer;
+}
+
+span.additional-metric-title {
+  cursor: pointer;
+}
+
+.additional-metrics.collapsed {
+  display: none;
+}
+
+.tooltip {
+ font-weight: normal;
+}
+
+.arrow-open {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid black;
+  float: left;
+  margin-top: 6px;
+}
+
+.arrow-closed {
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 5px solid black;
+  display: inline-block;
 }
