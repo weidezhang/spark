@@ -1,10 +1,10 @@
 package org.apache.spark.mllib.neuralNetwork
 
-import org.apache.spark.mllib.classification.{ClassificationModel, ANNClassifierHelper}
-import org.apache.spark.mllib.linalg.{Vectors, Vector}
+import breeze.linalg.{DenseVector => BDV}
+import org.apache.spark.mllib.classification.{ANNClassifierHelper, ClassificationModel}
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
-import breeze.linalg.{DenseVector => BDV}
 
 class MLPClassifierModel(val model: MLP, val labelToIndex: Map[Double, Int])
   extends ClassificationModel with ANNClassifierHelper with Serializable {
