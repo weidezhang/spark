@@ -308,6 +308,7 @@ object ArtificialNeuralNetwork {
       outputLayerSize: Int,
       hiddenLayersTopology: Array[Int],
       seed: Int): Vector = {
+
     val topology = inputLayerSize +: hiddenLayersTopology :+ outputLayerSize
     return randomWeights(topology, true, seed)
   }
