@@ -18,7 +18,7 @@
 package org.apache.spark.mllib.optimization
 
 import org.apache.spark.annotation.DeveloperApi
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.{DenseVector, Vector, Vectors}
 import org.apache.spark.mllib.linalg.BLAS.{axpy, dot, scal}
 
 /**
@@ -60,32 +60,65 @@ abstract class Gradient extends Serializable {
 @DeveloperApi
 class LogisticGradient extends Gradient {
   override def compute(data: Vector, label: Double, weights: Vector): (Vector, Double) = {
-    val margin = -1.0 * dot(data, weights)
-    val gradientMultiplier = (1.0 / (1.0 + math.exp(margin))) - label
-    val gradient = data.copy
-    scal(gradientMultiplier, gradient)
-    val loss =
-      if (label > 0) {
-        math.log1p(math.exp(margin)) // log1p is log(1+p) but more accurate for small p
-      } else {
-        math.log1p(math.exp(margin)) - margin
-      }
-
+    val gradient = Vectors.zeros(weights.size)
+    val loss = compute(data, label, weights, gradient)
     (gradient, loss)
   }
 
   override def compute(
-      data: Vector,
-      label: Double,
-      weights: Vector,
-      cumGradient: Vector): Double = {
-    val margin = -1.0 * dot(data, weights)
-    val gradientMultiplier = (1.0 / (1.0 + math.exp(margin))) - label
-    axpy(gradientMultiplier, data, cumGradient)
-    if (label > 0) {
-      math.log1p(math.exp(margin))
+                        data: Vector,
+                        label: Double,
+                        weights: Vector,
+                        cumGradient: Vector): Double = {
+    assert((weights.size % data.size) == 0)
+    val dataSize = data.size
+    // (n + 1) is number of classes
+    val n = (weights.size / dataSize)
+    val numerators = Array.ofDim[Double](n)
+
+    var denominator = 0.0
+    var margin = 0.0
+
+    val weightsArray = weights match {
+      case dv: DenseVector => dv.values
+      case _ =>
+        throw new IllegalArgumentException(
+          s"weights only supports dense vector but got type ${weights.getClass}.")
+    }
+    val cumGradientArray = cumGradient match {
+      case dv: DenseVector => dv.values
+      case _ =>
+        throw new IllegalArgumentException(
+          s"cumGradient only supports dense vector but got type ${cumGradient.getClass}.")
+    }
+
+    var i = 0
+    while (i < n) {
+      var sum = 0.0
+      data.foreachActive { (index, value) =>
+        if (value != 0.0) sum += value * weightsArray((i * dataSize) + index)
+      }
+      if (i == label.toInt - 1) margin = sum
+      numerators(i) = math.exp(sum)
+      denominator += numerators(i)
+      i += 1
+    }
+
+    i = 0
+    while (i < n) {
+      val multiplier = numerators(i) / (denominator + 1.0) - {
+        if (label != 0.0 && label == i + 1) 1.0 else 0.0
+      }
+      data.foreachActive { (index, value) =>
+        if (value != 0.0) cumGradientArray(i * dataSize + index) += multiplier * value
+      }
+      i += 1
+    }
+
+    if (label > 0.0) {
+      math.log1p(denominator) - margin
     } else {
-      math.log1p(math.exp(margin)) - margin
+      math.log1p(denominator)
     }
   }
 }
