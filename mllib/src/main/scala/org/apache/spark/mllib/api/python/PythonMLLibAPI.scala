@@ -212,8 +212,8 @@ class PythonMLLibAPI extends Serializable {
     LogRegAlg.optimizer
       .setNumIterations(numIterations)
       .setRegParam(regParam)
-      .setStepSize(stepSize)
-      .setMiniBatchFraction(miniBatchFraction)
+      //.setStepSize(stepSize)
+      //.setMiniBatchFraction(miniBatchFraction)
     LogRegAlg.optimizer.setUpdater(getUpdaterFromString(regType))
     trainRegressionModel(
       LogRegAlg,

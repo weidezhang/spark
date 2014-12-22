@@ -21,10 +21,13 @@ import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.mllib.feature.StandardScaler
 import org.apache.spark.{Logging, SparkException}
 import org.apache.spark.rdd.RDD
-import org.apache.spark.mllib.optimization._
 import org.apache.spark.mllib.linalg.{Vectors, Vector}
-import org.apache.spark.mllib.util.MLUtils._
+
 import org.apache.spark.storage.StorageLevel
+
+import org.apache.spark.mllib.optimization._
+import org.apache.spark.mllib.util.MLUtils._
+
 
 /**
  * :: DeveloperApi ::
@@ -38,6 +41,9 @@ import org.apache.spark.storage.StorageLevel
 @DeveloperApi
 abstract class GeneralizedLinearModel(val weights: Vector, val intercept: Double)
   extends Serializable {
+
+  /** Whether to add intercept (default: false). */
+  var addIntercept: Boolean = false
 
   /**
    * Predict the result given a data point and the weights learned.
@@ -88,13 +94,25 @@ abstract class GeneralizedLinearModel(val weights: Vector, val intercept: Double
 abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
   extends Logging with Serializable {
 
-  protected val validators: Seq[RDD[LabeledPoint] => Boolean] = List()
+  protected def validators: Seq[RDD[LabeledPoint] => Boolean] = List()
 
   /** The optimizer to solve the problem. */
   def optimizer: Optimizer
 
   /** Whether to add intercept (default: false). */
   protected var addIntercept: Boolean = false
+
+  /**
+   * This model contains multiple hyperplanes, which means multiple intercepts are required.
+   * Since it can not be stored in a single intercept variable, let's keep it inside weights vector
+   * and set the intercept variable to zero. (default: false).
+   */
+  protected def isMultipleIntercepts: Boolean = numOfIntercepts > 1
+
+  /**
+   * The number of intercepts in this model, (default: 1).
+   */
+  protected var numOfIntercepts: Int = 1
 
   protected var validateData: Boolean = true
 
@@ -136,13 +154,23 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
     this
   }
 
+  /** Whether a warning should be logged if the input RDD is uncached. */
+  private var warnOnUncachedInput = true
+
+  /** Disable warnings about uncached input. */
+  private[spark] def disableUncachedWarning(): this.type = {
+    warnOnUncachedInput = false
+    this
+  }
+
   /**
    * Run the algorithm with the configured parameters on an input
    * RDD of LabeledPoint entries.
    */
   def run(input: RDD[LabeledPoint]): M = {
     val numFeatures: Int = input.first().features.size
-    val initialWeights = Vectors.dense(new Array[Double](numFeatures))
+    val dimOfWeights = if(isMultipleIntercepts) (numFeatures + 1) * numOfIntercepts else numFeatures
+    val initialWeights = Vectors.dense(new Array[Double](dimOfWeights))
     run(input, initialWeights)
   }
 
@@ -152,7 +180,7 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
    */
   def run(input: RDD[LabeledPoint], initialWeights: Vector): M = {
 
-    if (input.getStorageLevel == StorageLevel.NONE) {
+    if (warnOnUncachedInput && input.getStorageLevel == StorageLevel.NONE) {
       logWarning("The input data is not directly cached, which may hurt performance if its"
         + " parent RDDs are also uncached.")
     }
@@ -195,6 +223,7 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
       } else {
         input.map(labeledPoint => (labeledPoint.label, appendBias(labeledPoint.features)))
       }
+
     } else {
       if (useFeatureScaling) {
         input.map(labeledPoint => (labeledPoint.label, scaler.transform(labeledPoint.features)))
@@ -203,21 +232,42 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
       }
     }
 
-    val initialWeightsWithIntercept = if (addIntercept) {
+    // TODO: We need a nicer api to allow users to set the initial intercept.
+    // Better by unifying the intercept and weights entirely into one vector make it cleaner.
+    // PS, if isMultipleIntercepts == true, users can set the intercepts by changing initialWeights
+    // which is different behavior when only having single intercept. We need to address this.
+    val initialWeightsWithIntercept = if (addIntercept && !isMultipleIntercepts) {
       appendBias(initialWeights)
     } else {
       initialWeights
     }
 
+    assert(initialWeightsWithIntercept.toBreeze.length % data.first._2.toBreeze.length == 0)
+
     val weightsWithIntercept = optimizer.optimize(data, initialWeightsWithIntercept)
 
-    val intercept = if (addIntercept) weightsWithIntercept(weightsWithIntercept.size - 1) else 0.0
+
+    // If the dimension of weightsWithIntercept / dimOfData != 1, the model have multiple
+    // hyperplane, which means the multiple intercepts can not be stored in single intercept
+    // variable. We just keep it in weights vector and set the intercept variable to zero.
+//    val isMultipleIntercepts =
+//      if(weightsWithIntercept.toBreeze.length / dimOfData == 1) false else true
+
+    val intercept =
+      if (addIntercept && !isMultipleIntercepts) {
+        weightsWithIntercept(weightsWithIntercept.size - 1)
+      }
+      else {
+        0.0
+      }
+
     var weights =
-      if (addIntercept) {
+      if (addIntercept && !isMultipleIntercepts) {
         Vectors.dense(weightsWithIntercept.toArray.slice(0, weightsWithIntercept.size - 1))
       } else {
         weightsWithIntercept
       }
+
 
     /**
      * The weights and intercept are trained in the scaled space; we're converting them back to
@@ -232,11 +282,15 @@ abstract class GeneralizedLinearAlgorithm[M <: GeneralizedLinearModel]
     }
 
     // Warn at the end of the run as well, for increased visibility.
-    if (input.getStorageLevel == StorageLevel.NONE) {
+    if (warnOnUncachedInput && input.getStorageLevel == StorageLevel.NONE) {
       logWarning("The input data was not directly cached, which may hurt performance if its"
         + " parent RDDs are also uncached.")
     }
 
-    createModel(weights, intercept)
+
+    val model = createModel(weights, intercept)
+    model.addIntercept = this.addIntercept
+    model
+
   }
 }

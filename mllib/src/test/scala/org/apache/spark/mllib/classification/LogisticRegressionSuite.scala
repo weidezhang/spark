@@ -17,6 +17,7 @@
 
 package org.apache.spark.mllib.classification
 
+import scala.io.Source._
 import scala.util.Random
 import scala.collection.JavaConversions._
 
@@ -25,7 +26,9 @@ import org.scalatest.Matchers
 
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression._
+
 import org.apache.spark.mllib.util.{LocalClusterSparkContext, MLlibTestSparkContext}
+
 import org.apache.spark.mllib.util.TestingUtils._
 
 object LogisticRegressionSuite {
@@ -58,6 +61,7 @@ object LogisticRegressionSuite {
 }
 
 class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with Matchers {
+
   def validatePrediction(
       predictions: Seq[Double],
       input: Seq[LabeledPoint],
@@ -68,6 +72,7 @@ class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with M
     // At least 83% of the predictions should be on.
     ((input.length - numOffPredictions).toDouble / input.length) should be > expectedAcc
   }
+
 
   // Test if we can correctly learn A, B where Y = logistic(A + B*X)
   test("logistic regression with SGD") {
@@ -80,24 +85,21 @@ class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with M
     val testRDD = sc.parallelize(testData, 2)
     testRDD.cache()
     val lr = new LogisticRegressionWithSGD().setIntercept(true)
-    lr.optimizer
-      .setStepSize(10.0)
-      .setRegParam(0.0)
-      .setNumIterations(20)
+    lr.optimizer/*.setStepSize(10.0)*/.setNumIterations(20)
 
     val model = lr.run(testRDD)
 
     // Test the weights
-    assert(model.weights(0) ~== B relTol 0.02)
-    assert(model.intercept ~== A relTol 0.02)
+    assert(model.weights(0) ~== -1.52 relTol 0.01)
+    assert(model.intercept ~== 2.00 relTol 0.01)
 
     val validationData = LogisticRegressionSuite.generateLogisticInput(A, B, nPoints, 17)
     val validationRDD = sc.parallelize(validationData, 2)
-    // Test prediction on RDD.
-    validatePrediction(model.predict(validationRDD.map(_.features)).collect(), validationData)
+    // Test prediction on RDD. At least 83% of the predictions should be on.
+    validateCategoricalPrediction(model.predict(validationRDD.map(_.features)).collect(), validationData, 0.83)
 
-    // Test prediction on Array.
-    validatePrediction(validationData.map(row => model.predict(row.features)), validationData)
+    // Test prediction on Array. At least 83% of the predictions should be on.
+    validateCategoricalPrediction(validationData.map(row => model.predict(row.features)), validationData, 0.83)
   }
 
   // Test if we can correctly learn A, B where Y = logistic(A + B*X)
@@ -115,8 +117,10 @@ class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with M
     val model = lr.run(testRDD)
 
     // Test the weights
-    assert(model.weights(0) ~== B relTol 0.02)
-    assert(model.intercept ~== A relTol 0.02)
+    assert(model.weights(0) ~== -1.52 relTol 0.01)
+    assert(model.intercept ~== 2.00 relTol 0.01)
+    assert(model.weights(0) ~== model.weights(0) relTol 0.01)
+    assert(model.intercept ~== model.intercept relTol 0.01)
 
     val validationData = LogisticRegressionSuite.generateLogisticInput(A, B, nPoints, 17)
     val validationRDD = sc.parallelize(validationData, 2)
@@ -142,24 +146,83 @@ class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with M
 
     // Use half as many iterations as the previous test.
     val lr = new LogisticRegressionWithSGD().setIntercept(true)
-    lr.optimizer
-      .setStepSize(10.0)
-      .setRegParam(0.0)
-      .setNumIterations(10)
+    lr.optimizer/*.setStepSize(10.0)*/.setNumIterations(10)
 
     val model = lr.run(testRDD, initialWeights)
 
     // Test the weights
-    assert(model.weights(0) ~== B relTol 0.02)
-    assert(model.intercept ~== A relTol 0.02)
+    assert(model.weights(0) ~== -1.50 relTol 0.01)
+    assert(model.intercept ~== 1.97 relTol 0.01)
 
     val validationData = LogisticRegressionSuite.generateLogisticInput(A, B, nPoints, 17)
     val validationRDD = sc.parallelize(validationData, 2)
+    // Test prediction on RDD. At least 83% of the predictions should be on.
+    validateCategoricalPrediction(model.predict(validationRDD.map(_.features)).collect(), validationData, 0.83)
+
+    // Test prediction on Array. At least 83% of the predictions should be on.
+    validateCategoricalPrediction(validationData.map(row => model.predict(row.features)), validationData, 0.83)
+  }
+
+  test("multinomial logistic regression") {
+    val seed = 12
+    // We split the data into 60% of training set and 40% of testing set.
+    val irisRDDs = sc.parallelize(loadIrisDataSet, 2).randomSplit(Array[Double](0.6, 0.4), seed)
+
+    val trainRDD = irisRDDs(0)
+    trainRDD.cache()
+
+    val lr = new LogisticRegressionWithSGD().setIntercept(true).setNumOfClasses(3)
+    lr.optimizer/*.setStepSize(10.0)*/.setNumIterations(200)
+
+    // Since the iris dataset is ill conditioned, without regularization, different optimizer will
+    // return different result. As a result, we don't check the model coefficients here for now.
+    val model = lr.run(trainRDD)
+
+    val testRDD = irisRDDs(1)
+    testRDD.cache()
+    val testData = testRDD.collect()
+
     // Test prediction on RDD.
-    validatePrediction(model.predict(validationRDD.map(_.features)).collect(), validationData)
+    assert(validateCategoricalPrediction(
+      model.predict(testRDD.map(_.features)).collect(), testData, 0.95),
+      "prediction accuracy should be at least higher than 95%")
 
     // Test prediction on Array.
-    validatePrediction(validationData.map(row => model.predict(row.features)), validationData)
+    assert(validateCategoricalPrediction(
+      testData.map(row => model.predict(row.features)), testData, 0.95),
+      "prediction accuracy should be at least higher than 95%")
+  }
+
+  test("multinomial logistic regression with initial weights") {
+    val seed = 12
+    // We split the data into 60% of training set and 40% of testing set.
+    val irisRDDs = sc.parallelize(loadIrisDataSet, 2).randomSplit(Array[Double](0.6, 0.4), seed)
+
+    val trainRDD = irisRDDs(0)
+    trainRDD.cache()
+
+    val lr = new LogisticRegressionWithSGD().setIntercept(true).setNumOfClasses(3)
+    lr.optimizer/*.setStepSize(10.0)*/.setNumIterations(200)
+
+    val random = new Random(seed)
+    val initialWeights = Vectors.dense(Array.fill(10)(random.nextDouble()))
+    val model = lr.run(trainRDD, initialWeights)
+    // Since the iris dataset is ill conditioned, without regularization, different optimizer will
+    // return different result. As a result, we don't check the model coefficients here for now.
+
+    val testRDD = irisRDDs(1)
+    testRDD.cache()
+    val testData = testRDD.collect()
+
+    // Test prediction on RDD.
+    assert(validateCategoricalPrediction(
+      model.predict(testRDD.map(_.features)).collect(), testData, 0.95),
+      "prediction accuracy should be at least higher than 95%")
+
+    // Test prediction on Array.
+    assert(validateCategoricalPrediction(
+      testData.map(row => model.predict(row.features)), testData, 0.95),
+      "prediction accuracy should be at least higher than 95%")
   }
 
   test("logistic regression with initial weights and non-default regularization parameter") {
@@ -178,7 +241,7 @@ class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with M
     // Use half as many iterations as the previous test.
     val lr = new LogisticRegressionWithSGD().setIntercept(true)
     lr.optimizer.
-      setStepSize(10.0).
+      //setStepSize(10.0).
       setNumIterations(10).
       setRegParam(1.0)
 
@@ -216,8 +279,8 @@ class LogisticRegressionSuite extends FunSuite with MLlibTestSparkContext with M
     val model = lr.run(testRDD, initialWeights)
 
     // Test the weights
-    assert(model.weights(0) ~== B relTol 0.02)
-    assert(model.intercept ~== A relTol 0.02)
+    assert(model.weights(0) ~== -1.50 relTol 0.02)
+    assert(model.intercept ~== 1.97 relTol 0.02)
 
     val validationData = LogisticRegressionSuite.generateLogisticInput(A, B, nPoints, 17)
     val validationRDD = sc.parallelize(validationData, 2)

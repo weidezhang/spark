@@ -68,7 +68,7 @@ public class JavaLogisticRegressionSuite implements Serializable {
 
     LogisticRegressionWithSGD lrImpl = new LogisticRegressionWithSGD();
     lrImpl.setIntercept(true);
-    lrImpl.optimizer().setStepSize(1.0)
+    lrImpl.optimizer()//.setStepSize(1.0)
                       .setRegParam(1.0)
                       .setNumIterations(100);
     LogisticRegressionModel model = lrImpl.run(testRDD.rdd());

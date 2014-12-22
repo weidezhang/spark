@@ -17,37 +17,39 @@
 
 package org.apache.spark.mllib.classification
 
-import scala.collection.JavaConversions._
-import scala.util.Random
+import org.apache.spark.mllib.util.MLlibTestSparkContext
 
-import org.jblas.DoubleMatrix
+import scala.util.Random
+import scala.collection.JavaConversions._
+
 import org.scalatest.FunSuite
 
+import org.jblas.DoubleMatrix
+
 import org.apache.spark.SparkException
-import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression._
-import org.apache.spark.mllib.util.{LocalClusterSparkContext, MLlibTestSparkContext}
+import org.apache.spark.mllib.linalg.Vectors
 
 object SVMSuite {
 
   def generateSVMInputAsList(
-    intercept: Double,
-    weights: Array[Double],
-    nPoints: Int,
-    seed: Int): java.util.List[LabeledPoint] = {
+                              intercept: Double,
+                              weights: Array[Double],
+                              nPoints: Int,
+                              seed: Int): java.util.List[LabeledPoint] = {
     seqAsJavaList(generateSVMInput(intercept, weights, nPoints, seed))
   }
 
   // Generate noisy input of the form Y = signum(x.dot(weights) + intercept + noise)
   def generateSVMInput(
-    intercept: Double,
-    weights: Array[Double],
-    nPoints: Int,
-    seed: Int): Seq[LabeledPoint] = {
+                        intercept: Double,
+                        weights: Array[Double],
+                        nPoints: Int,
+                        seed: Int): Seq[LabeledPoint] = {
     val rnd = new Random(seed)
     val weightsMat = new DoubleMatrix(1, weights.length, weights:_*)
     val x = Array.fill[Array[Double]](nPoints)(
-        Array.fill[Double](weights.length)(rnd.nextDouble() * 2.0 - 1.0))
+      Array.fill[Double](weights.length)(rnd.nextDouble() * 2.0 - 1.0))
     val y = x.map { xi =>
       val yD = new DoubleMatrix(1, xi.length, xi: _*).dot(weightsMat) +
         intercept + 0.01 * rnd.nextGaussian()
@@ -190,21 +192,5 @@ class SVMSuite extends FunSuite with MLlibTestSparkContext {
 
     // Turning off data validation should not throw an exception
     new SVMWithSGD().setValidateData(false).run(testRDDInvalid)
-  }
-}
-
-class SVMClusterSuite extends FunSuite with LocalClusterSparkContext {
-
-  test("task size should be small in both training and prediction") {
-    val m = 4
-    val n = 200000
-    val points = sc.parallelize(0 until m, 2).mapPartitionsWithIndex { (idx, iter) =>
-      val random = new Random(idx)
-      iter.map(i => LabeledPoint(1.0, Vectors.dense(Array.fill(n)(random.nextDouble()))))
-    }.cache()
-    // If we serialize data directly in the task closure, the size of the serialized task would be
-    // greater than 1MB and hence Spark would throw an error.
-    val model = SVMWithSGD.train(points, 2)
-    val predictions = model.predict(points.map(_.features))
   }
 }

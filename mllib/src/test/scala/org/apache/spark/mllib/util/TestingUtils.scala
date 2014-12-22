@@ -17,8 +17,12 @@
 
 package org.apache.spark.mllib.util
 
-import org.apache.spark.mllib.linalg.{Matrix, Vector}
+
+import org.apache.spark.mllib.linalg.{Vectors, Matrix, Vector}
+import org.apache.spark.mllib.regression.LabeledPoint
 import org.scalatest.exceptions.TestFailedException
+
+import scala.io.Source._
 
 object TestingUtils {
 
@@ -42,6 +46,33 @@ object TestingUtils {
     } else {
       diff < eps * math.min(absX, absY)
     }
+  }
+
+  def validateCategoricalPrediction(
+                                     predictions: Seq[Double],
+                                     input: Seq[LabeledPoint],
+                                     acc: Double): Boolean = {
+    val numOffPredictions = predictions.zip(input).count { case (prediction, expected) =>
+      prediction.round != expected.label.round
+    }
+    ((input.length - numOffPredictions).toDouble / input.length) > acc
+  }
+
+  def loadIrisDataSet: Seq[LabeledPoint] = {
+    val file = this.getClass.getResource(
+      "/org/apache/spark/mllib/dataset/classification/iris.csv").toURI
+    val lines = fromFile(file).getLines.drop(1)
+
+    lines.map(line => {
+      val temp = line.toString.split(",")
+      val y: Int = temp(4) match {
+        case "Iris-setosa" => 0
+        case "Iris-versicolor" => 1
+        case "Iris-virginica" => 2
+      }
+      val x = temp.slice(0, 4).map(_.toDouble)
+      LabeledPoint(y, Vectors.dense(x))
+    }).toSeq
   }
 
   /**
@@ -231,5 +262,6 @@ object TestingUtils {
 
     override def toString = x.toString
   }
+
 
 }
