@@ -471,14 +471,6 @@ private[ann] trait NeuralHelper {
 
 private class ANNLeastSquaresGradient(val topology: Array[Int]) extends Gradient with NeuralHelper {
 
-  var gradTime: Long = 0
-  var cumTime: Long = 0
-  var rollTime: Long = 0
-  var unrollTime: Long = 0
-  var forwardTime: Long = 0
-  var backwardTime: Long = 0
-  var num = 0
-
   override def compute(data: Vector, label: Double, weights: Vector): (Vector, Double) = {
     val gradient = Vectors.zeros(weights.size)
     val loss = compute(data, label, weights, gradient)
@@ -487,46 +479,19 @@ private class ANNLeastSquaresGradient(val topology: Array[Int]) extends Gradient
 
   override def compute(data: Vector, label: Double, weights: Vector,
                        cumGradient: Vector): Double = {
-
-    var t = System.currentTimeMillis()
-    val total = t
     val arrData = data.toArray
     val input = new BDV(arrData, 0, 1, topology(0)).toDenseMatrix.t
     val targetVector =
       new BDV(arrData, topology(0), 1, arrData.length - topology(0)).toDenseMatrix.t
     val (weightMatrices, bias) = unrollWeights(weights)
-    unrollTime += (System.currentTimeMillis() - t)
-    t = System.currentTimeMillis()
     /* forward run */
     val outputs = forwardRun(input, weightMatrices, bias)
-    forwardTime += (System.currentTimeMillis() - t)
-    t = System.currentTimeMillis()
     /* error back propagation */
-    val (gradientMatrices, errors) = wGradient(weightMatrices, targetVector, outputs)
-    backwardTime += (System.currentTimeMillis() - t)
-    t = System.currentTimeMillis()
-    rollWeights(gradientMatrices, errors, cumGradient)
-    rollTime += (System.currentTimeMillis() - t)
-    t = System.currentTimeMillis()
+    val (gradientMatrices, deltas) = wGradient(weightMatrices, targetVector, outputs)
+    rollWeights(gradientMatrices, deltas, cumGradient)
     /* error */
-    val delta = targetVector :- outputs(topology.size - 1)
-    val outerError = Bsum(delta :* delta) / 2
-
-    gradTime += (System.currentTimeMillis() - total)
-    num += 1
-    if(false/*num % 100 == 0*/){
-      println("GradTime: " + gradTime + " CumTime: " + cumTime)
-      println("UnrollTime:" + unrollTime)
-      println("ForwardTime:" + forwardTime)
-      println("BackwardTime:" + backwardTime)
-      println("RollTime:" + rollTime)
-      gradTime = 0
-      cumTime = 0
-      unrollTime = 0
-      forwardTime = 0
-      backwardTime = 0
-      rollTime = 0
-    }
+    val diff = targetVector :- outputs(topology.size - 1)
+    val outerError = Bsum(diff :* diff) / 2
     outerError
   }
 }
