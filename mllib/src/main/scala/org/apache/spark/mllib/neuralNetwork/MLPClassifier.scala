@@ -56,8 +56,8 @@ class MLPClassifier private(val labelToIndex: Map[Double, Int],
 
   def run(data: RDD[LabeledPoint]): MLPClassifierModel = {
     val annData = data.map(lp => labeledPointToVectorPair(lp))
-    //val model = MLP.runLBFGS(annData, topology, batchSize, maxIterations, 1e-4, 0.0)
-    val model = MLP.runSGD(annData, topology, batchSize, maxIterations, 1.0, 1.0, 0.1)
+    val model = MLP.runLBFGS(annData, topology, batchSize, maxIterations, 1e-4, 0.0)
+    //val model = MLP.runSGD(annData, topology, batchSize, maxIterations, 1.0, 1.0, 0.1)
     println("error:" + MLP.error(annData, model, batchSize))
     new MLPClassifierModel(model, labelToIndex)
   }
