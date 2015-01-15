@@ -19,7 +19,7 @@ package org.apache.spark.mllib.neuralNetwork
 
 import breeze.linalg.{DenseVector => BDV}
 import org.apache.spark.mllib.classification.{ANNClassifierHelper, ClassificationModel}
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.{Vector, Vectors, Matrices}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.rdd.RDD
 
@@ -43,7 +43,7 @@ class MLPClassifierModel(val model: MLP, val labelToIndex: Map[Double, Int])
    */
   override def predict(testData: Vector): Double = {
     val bv: BDV[Double] = testData.toBreeze.toDenseVector
-    val result = Vectors.fromBreeze(model.predict(bv.toDenseMatrix.t).toDenseVector)
+    val result = Vectors.fromBreeze(model.predict(Matrices.fromBreeze(bv.toDenseMatrix.t)).toDenseVector)
     outputToLabel(result)
   }
 }
