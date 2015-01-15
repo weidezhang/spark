@@ -75,10 +75,10 @@ class ANNClassifier private(val labelToIndex: Map[Double, Int],
                              private val convergeTol: Double)
   extends ANNClassifierHelper with Serializable {
 
-  def run(data: RDD[LabeledPoint]): ANNClassifierModel = {
+  def run(data: RDD[LabeledPoint], batchSize: Int = 1): ANNClassifierModel = {
     val annData = data.map(lp => labeledPointToVectorPair(lp))
     /* train the model */
-    val model = ArtificialNeuralNetwork.train(annData, hiddenLayersTopology,
+    val model = ArtificialNeuralNetwork.train(annData, batchSize, hiddenLayersTopology,
       initialWeights, maxIterations, convergeTol)
     new ANNClassifierModel(model, labelToIndex)
   }
@@ -89,10 +89,58 @@ class ANNClassifier private(val labelToIndex: Map[Double, Int],
  */
 object ANNClassifier {
 
+  private val defaultStepSize = 1.0
+  private val defaultBatchSize = 1
+
   /**
    * Trains an ANN classifier.
    *
    * @param data RDD containing labeled points for training.
+   * @param batchSize batch size - number of instances to process in batch
+   * @param hiddenLayersTopology number of nodes per hidden layer, excluding the bias nodes.
+   * @param maxIterations specifies maximum number of training iterations.
+   * @param convergenceTol convergence tolerance for LBFGS
+   * @return ANN model.
+   */
+  def train(data: RDD[LabeledPoint],
+            batchSize: Int,
+            hiddenLayersTopology: Array[Int],
+            maxIterations: Int,
+            convergenceTol: Double): ANNClassifierModel = {
+    val initialWeights = randomWeights(data, hiddenLayersTopology)
+    train(data, batchSize, hiddenLayersTopology,
+      initialWeights, maxIterations, defaultStepSize, convergenceTol)
+  }
+
+  /**
+   * Trains an already pre-trained ANN classifier.
+   * Assumes that the data has the same labels that the
+   * data that were used for training, or at least the
+   * subset of that labels
+   *
+   * @param data RDD containing labeled points for training.
+   * @param batchSize batch size - number of instances to process in batch
+   * @param model a pre-trained ANN classifier model.
+   * @param maxIterations specifies maximum number of training iterations.
+   * @param convergenceTol convergence tolerance for LBFGS
+   * @return ANN classifier model.
+   */
+  def train(data: RDD[LabeledPoint],
+            batchSize: Int,
+            model: ANNClassifierModel,
+            maxIterations: Int,
+            convergenceTol: Double): ANNClassifierModel = {
+    val hiddenLayersTopology =
+      model.annModel.topology.slice(1, model.annModel.topology.length - 1)
+    new ANNClassifier(model.labelToIndex, hiddenLayersTopology,
+      model.annModel.weights, maxIterations, defaultStepSize, convergenceTol).run(data, batchSize)
+  }
+
+  /**
+   * Trains an ANN classifier.
+   *
+   * @param data RDD containing labeled points for training.
+   * @param batchSize batch size - number of instances to process in batch
    * @param hiddenLayersTopology number of nodes per hidden layer, excluding the bias nodes.
    * @param initialWeights initial weights of underlying artificial neural network
    * @param maxIterations specifies maximum number of training iterations.
@@ -100,12 +148,16 @@ object ANNClassifier {
    * @param convergenceTol convergence tolerance for LBFGS
    * @return ANN model.
    */
-  def train(data: RDD[LabeledPoint], hiddenLayersTopology: Array[Int],
-            initialWeights: Vector, maxIterations: Int,
-            stepSize: Double, convergenceTol: Double): ANNClassifierModel = {
+  def train(data: RDD[LabeledPoint],
+            batchSize: Int,
+            hiddenLayersTopology: Array[Int],
+            initialWeights: Vector,
+            maxIterations: Int,
+            stepSize: Double,
+            convergenceTol: Double): ANNClassifierModel = {
     val labelToIndex = data.map( lp => lp.label).distinct().collect().sorted.zipWithIndex.toMap
     new ANNClassifier(labelToIndex, hiddenLayersTopology,
-      initialWeights, maxIterations, stepSize, convergenceTol).run(data)
+      initialWeights, maxIterations, stepSize, convergenceTol).run(data, batchSize)
   }
 
   /**
@@ -118,10 +170,14 @@ object ANNClassifier {
    * @param convergenceTol convergence tolerance for LBFGS
    * @return ANN classifier model.
    */
-  def train(data: RDD[LabeledPoint], hiddenLayersTopology: Array[Int], maxIterations: Int,
-            stepSize: Double, convergenceTol: Double): ANNClassifierModel = {
+  def train(data: RDD[LabeledPoint],
+            hiddenLayersTopology: Array[Int],
+            maxIterations: Int,
+            stepSize: Double,
+            convergenceTol: Double): ANNClassifierModel = {
     val initialWeights = randomWeights(data, hiddenLayersTopology)
-    train(data, hiddenLayersTopology, initialWeights, maxIterations, stepSize, convergenceTol)
+    train(data, defaultBatchSize, hiddenLayersTopology, initialWeights, maxIterations, stepSize,
+      convergenceTol)
   }
 
   /**
@@ -137,8 +193,11 @@ object ANNClassifier {
    * @param convergenceTol convergence tolerance for LBFGS
    * @return ANN classifier model.
    */
-  def train(data: RDD[LabeledPoint], model: ANNClassifierModel, maxIterations: Int,
-            stepSize: Double, convergenceTol: Double): ANNClassifierModel = {
+  def train(data: RDD[LabeledPoint],
+            model: ANNClassifierModel,
+            maxIterations: Int,
+            stepSize: Double,
+            convergenceTol: Double): ANNClassifierModel = {
     val hiddenLayersTopology =
       model.annModel.topology.slice(1, model.annModel.topology.length - 1)
     new ANNClassifier(model.labelToIndex, hiddenLayersTopology,
