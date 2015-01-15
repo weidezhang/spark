@@ -246,8 +246,11 @@ private[spark] object Utils extends Logging {
     retval
   }
 
-  /** Create a temporary directory inside the given parent directory */
-  def createTempDir(root: String = System.getProperty("java.io.tmpdir")): File = {
+  /**
+   * Create a directory inside the given parent directory. The directory is guaranteed to be
+   * newly created, and is not marked for automatic deletion.
+   */
+  def createDirectory(root: String): File = {
     var attempts = 0
     val maxAttempts = 10
     var dir: File = null
@@ -265,6 +268,15 @@ private[spark] object Utils extends Logging {
       } catch { case e: SecurityException => dir = null; }
     }
 
+    dir
+  }
+
+  /**
+   * Create a temporary directory inside the given parent directory. The directory will be
+   * automatically deleted when the VM shuts down.
+   */
+  def createTempDir(root: String = System.getProperty("java.io.tmpdir")): File = {
+    val dir = createDirectory(root)
     registerShutdownDeleteDir(dir)
     dir
   }
@@ -978,11 +990,12 @@ private[spark] object Utils extends Logging {
     for ((key, value) <- extraEnvironment) {
       environment.put(key, value)
     }
+
     val process = builder.start()
     new Thread("read stderr for " + command(0)) {
       override def run() {
         for (line <- Source.fromInputStream(process.getErrorStream).getLines()) {
-          System.err.println(line)
+          logInfo(line)
         }
       }
     }.start()
@@ -1077,7 +1090,7 @@ private[spark] object Utils extends Logging {
     var firstUserLine = 0
     var insideSpark = true
     var callStack = new ArrayBuffer[String]() :+ "<unknown>"
- 
+
     Thread.currentThread.getStackTrace().foreach { ste: StackTraceElement =>
       // When running under some profilers, the current stack trace might contain some bogus
       // frames. This is intended to ensure that we don't crash in these situations by
@@ -1830,24 +1843,63 @@ private[spark] object Utils extends Logging {
       sparkValue
     }
   }
+
+  /**
+   * Return a pair of host and port extracted from the `sparkUrl`.
+   *
+   * A spark url (`spark://host:port`) is a special URI that its scheme is `spark` and only contains
+   * host and port.
+   *
+   * @throws SparkException if `sparkUrl` is invalid.
+   */
+  def extractHostPortFromSparkUrl(sparkUrl: String): (String, Int) = {
+    try {
+      val uri = new java.net.URI(sparkUrl)
+      val host = uri.getHost
+      val port = uri.getPort
+      if (uri.getScheme != "spark" ||
+        host == null ||
+        port < 0 ||
+        (uri.getPath != null && !uri.getPath.isEmpty) || // uri.getPath returns "" instead of null
+        uri.getFragment != null ||
+        uri.getQuery != null ||
+        uri.getUserInfo != null) {
+        throw new SparkException("Invalid master URL: " + sparkUrl)
+      }
+      (host, port)
+    } catch {
+      case e: java.net.URISyntaxException =>
+        throw new SparkException("Invalid master URL: " + sparkUrl, e)
+    }
+  }
 }
 
 /**
  * A utility class to redirect the child process's stdout or stderr.
  */
-private[spark] class RedirectThread(in: InputStream, out: OutputStream, name: String)
+private[spark] class RedirectThread(
+    in: InputStream,
+    out: OutputStream,
+    name: String,
+    propagateEof: Boolean = false)
   extends Thread(name) {
 
   setDaemon(true)
   override def run() {
     scala.util.control.Exception.ignoring(classOf[IOException]) {
       // FIXME: We copy the stream on the level of bytes to avoid encoding problems.
-      val buf = new Array[Byte](1024)
-      var len = in.read(buf)
-      while (len != -1) {
-        out.write(buf, 0, len)
-        out.flush()
-        len = in.read(buf)
+      try {
+        val buf = new Array[Byte](1024)
+        var len = in.read(buf)
+        while (len != -1) {
+          out.write(buf, 0, len)
+          out.flush()
+          len = in.read(buf)
+        }
+      } finally {
+        if (propagateEof) {
+          out.close()
+        }
       }
     }
   }

@@ -21,6 +21,7 @@ package org.apache.spark.mllib.optimization
 import org.apache.spark.annotation.DeveloperApi
 import org.apache.spark.mllib.linalg.{Vector, Vectors, DenseVector}
 import org.apache.spark.mllib.linalg.BLAS.{axpy, dot, scal}
+import org.apache.spark.mllib.util.MLUtils
 
 /**
  * :: DeveloperApi ::
@@ -51,6 +52,28 @@ abstract class Gradient extends Serializable {
    * @return loss
    */
   def compute(data: Vector, label: Double, weights: Vector, cumGradient: Vector): Double
+
+  /**
+   * Compute the gradient and loss given the iterator.
+   *
+   * @param iter Iterator for (label, data) pair
+   * @param weights weights/coefficients corresponding to features
+   * @param cumGradient the computed gradient will be added to this vector
+   *
+   * @return (count: Long, loss: Double)
+   */
+  def compute(
+      iter: Iterator[(Double, Vector)],
+      weights: Vector,
+      cumGradient: Vector): (Long, Double) = {
+    var loss = 0D
+    var count = 0L
+    iter.foreach { t =>
+      loss += compute(t._2, t._1, weights, cumGradient)
+      count += 1
+    }
+    (count, loss)
+  }
 }
 
 /**
@@ -134,9 +157,10 @@ class LogisticGradient extends Gradient {
     scal(gradientMultiplier, gradient)
     val loss =
       if (label > 0) {
-        math.log1p(math.exp(margin)) // log1p is log(1+p) but more accurate for small p
+        // The following is equivalent to log(1 + exp(margin)) but more numerically stable.
+        MLUtils.log1pExp(margin)
       } else {
-        math.log1p(math.exp(margin)) - margin
+        MLUtils.log1pExp(margin) - margin
       }
 
     (gradient, loss)
@@ -148,50 +172,14 @@ class LogisticGradient extends Gradient {
       label: Double,
       weights: Vector,
       cumGradient: Vector): Double = {
-
-    def alpha(i: Int): Int = if (i == 0) 1 else 0
-    def delta(i: Int, j: Int): Int = if (i == j) 1 else 0
-
-    val brzData = data.toBreeze
-    val brzWeights = weights.toBreeze
-    val brzCumGradient = cumGradient.toBreeze
-
-    assert((brzWeights.length % brzData.length) == 0)
-    assert(cumGradient.toBreeze.length == brzWeights.length)
-
-    val nClasses = (brzWeights.length / brzData.length) + 1
-    val classLabel = math.round(label).toInt
-
-    var denominator = 1.0
-    val numerators = Array.ofDim[Double](nClasses - 1)
-
-    var i = 0
-    while (i < nClasses - 1) {
-      var acc = 0.0
-      brzData.activeIterator.foreach {
-        case (_, 0.0) => // Skip explicit zero elements.
-        case (j, value) => acc += value * brzWeights((i * brzData.length) + j)
-      }
-      numerators(i) = math.exp(acc)
-      denominator += numerators(i)
-      i += 1
-    }
-
-    i = 0
-    while (i < nClasses - 1) {
-      brzData.activeIterator.foreach {
-        case (_, 0.0) => // Skip explicit zero elements.
-        case (j, value) => brzCumGradient(i * data.toBreeze.length + j) -=
-          ((1 - alpha(classLabel)) * delta(classLabel, i + 1) - numerators(i) / denominator) *
-            brzData(j)
-      }
-      i += 1
-    }
-
-    classLabel match {
-      case 0 => -math.log(1.0 / denominator)
-      case _ => -math.log(numerators(classLabel - 1) / denominator)
-
+    val margin = -1.0 * dot(data, weights)
+    val gradientMultiplier = (1.0 / (1.0 + math.exp(margin))) - label
+    axpy(gradientMultiplier, data, cumGradient)
+    if (label > 0) {
+      // The following is equivalent to log(1 + exp(margin)) but more numerically stable.
+      MLUtils.log1pExp(margin)
+    } else {
+      MLUtils.log1pExp(margin) - margin
     }
   }
 }
@@ -200,16 +188,16 @@ class LogisticGradient extends Gradient {
  * :: DeveloperApi ::
  * Compute gradient and loss for a Least-squared loss function, as used in linear regression.
  * This is correct for the averaged least squares loss function (mean squared error)
- *              L = 1/n ||A weights-y||^2
+ *              L = 1/2n ||A weights-y||^2
  * See also the documentation for the precise formulation.
  */
 @DeveloperApi
 class LeastSquaresGradient extends Gradient {
   override def compute(data: Vector, label: Double, weights: Vector): (Vector, Double) = {
     val diff = dot(data, weights) - label
-    val loss = diff * diff
+    val loss = diff * diff / 2.0
     val gradient = data.copy
-    scal(2.0 * diff, gradient)
+    scal(diff, gradient)
     (gradient, loss)
   }
 
@@ -219,8 +207,8 @@ class LeastSquaresGradient extends Gradient {
       weights: Vector,
       cumGradient: Vector): Double = {
     val diff = dot(data, weights) - label
-    axpy(2.0 * diff, data, cumGradient)
-    diff * diff
+    axpy(diff, data, cumGradient)
+    diff * diff / 2.0
   }
 }
 
