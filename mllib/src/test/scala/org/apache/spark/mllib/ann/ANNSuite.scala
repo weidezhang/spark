@@ -38,13 +38,27 @@ class ANNSuite extends FunSuite with MLlibTestSparkContext {
       (Vectors.dense(features), Vectors.dense(Array(label)))}
     val rddData = sc.parallelize(data, 2)
     val hiddenLayersTopology = Array[Int](5)
-    val initialWeights = ArtificialNeuralNetwork.randomWeights(rddData, hiddenLayersTopology, 0x01234567)
-    val model = ArtificialNeuralNetwork.train(rddData, hiddenLayersTopology, initialWeights, 200)
+    val initialWeights = ArtificialNeuralNetwork.
+      randomWeights(rddData, hiddenLayersTopology, 0x01234567)
+    val model = ArtificialNeuralNetwork.
+      train(rddData, 4, hiddenLayersTopology, initialWeights, 200, 1e-4)
     val predictionAndLabels = rddData.map { case(input, label) =>
       (model.predict(input)(0), label(0)) }.collect()
     assert(predictionAndLabels.forall { case(p, l) => (math.round(p) - l) == 0 })
   }
-
+  
+  /*
+  This test compares the output of the annGradient.compute function with the following
+  approximations:
+    
+  dE / dw_k ~= ( E(w + eps*e_k, x) - E(w, x) ) / eps
+    
+  where E(w, x) is the summed squared error multiplied by a factor 0.5, given weight vector w
+  and input x, w_k the k-th element in the weight vector (starting with k=0) and e_k the
+  associated k-th cartesian unit vector.
+  
+  The test is passed when the difference is less than accept=1e-7 with eps=1e-6.
+  */
   test("Gradient of ANN") {
     val eps = 1e-6
     val accept = 1e-7
