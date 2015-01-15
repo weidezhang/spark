@@ -43,7 +43,7 @@ class MLPClassifierModel(val model: MLP, val labelToIndex: Map[Double, Int])
    */
   override def predict(testData: Vector): Double = {
     val bv: BDV[Double] = testData.toBreeze.toDenseVector
-    val result = Vectors.fromBreeze(model.predict(Matrices.fromBreeze(bv.toDenseMatrix.t)).toDenseVector)
+    val result = Vectors.fromBreeze(model.predict(Matrices.fromBreeze(bv.toDenseMatrix.t)).toBreeze.flatten())
     outputToLabel(result)
   }
 }
