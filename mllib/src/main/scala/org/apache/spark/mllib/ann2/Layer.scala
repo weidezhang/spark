@@ -26,6 +26,8 @@ import org.apache.spark.mllib.optimization.{Updater, LBFGS, Gradient}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.random.XORShiftRandom
 
+import scala.collection.BitSet
+
 /* Trait that holds Layer properties, that are needed to instantiate it.
 *  Implements Layer instantiation.
 * */
@@ -166,7 +168,8 @@ object FunctionalLayerModel {
 
 /* Network topology that holds the array of layers.
 * */
-class Topology(val layers: Array[Layer], val dropoutProb: Array[Double]) extends Serializable {
+class Topology(val layers: Array[Layer], val inputDropoutProb: Double,
+               val layerDropoutProb: Double) extends Serializable {
 
 }
 
@@ -174,7 +177,11 @@ class Topology(val layers: Array[Layer], val dropoutProb: Array[Double]) extends
 * */
 object Topology {
   def apply(layers: Array[Layer]): Topology = {
-    new Topology(layers, Array.fill[Double](layers.length)(0D))
+    new Topology(layers, 0.0, 0.0)
+  }
+
+  def apply(layers: Array[Layer], inputDropoutProb: Double, layerDropoutProb: Double): Topology = {
+    new Topology(layers, inputDropoutProb, layerDropoutProb)
   }
 
   def multiLayerPerceptron(layerSizes: Array[Int]): Topology = {
@@ -191,18 +198,44 @@ object Topology {
 * Implements forward, gradient computation and can return weights in vector format.
 * */
 class FeedForwardModel(val layerModels: Array[LayerModel], val topology: Topology) extends Serializable {
+  private val rand = new XORShiftRandom(System.nanoTime())
+
   def forward(data: BDM[Double]): Array[BDM[Double]] = {
+    // TODO: how to reuse forward in gradient? it is different for dropout
     val outputs = new Array[BDM[Double]](layerModels.length)
-    outputs(0) = layerModels(0).eval(data)
-    for(i <- 1 until layerModels.length){
-      outputs(i) = layerModels(i).eval(outputs(i-1))
+    val lastIndex = layerModels.lastIndexWhere(lm => lm.size > 0)
+    // TODO: do we need to use dropout for the input layer?
+    for(i <- 0 until layerModels.length){
+      outputs(i) = layerModels(i).eval(if (i==0) data else outputs(i - 1))
+      // use probabilities only on layers with weights except the last one
+      if (topology.layerDropoutProb > 0 && layerModels(i).size > 0 && i < lastIndex) {
+        outputs(i) :*= 1.0 - topology.layerDropoutProb
+      }
     }
     outputs
   }
 
   def computeGradient(data: BDM[Double], target: BDM[Double], cumGradient: Vector,
                       realBatchSize: Int): Double = {
-    val outputs = forward(data)
+    var inputMask: BitSet = null
+    val layerMasks = new Array[BitSet](layerModels.length)
+    val outputs = new Array[BDM[Double]](layerModels.length)
+    if (topology.inputDropoutProb > 0) {
+      inputMask = makeMask(data, topology.inputDropoutProb)
+      applyMask(data, inputMask)
+    }
+    val lastIndex = layerModels.lastIndexWhere(lm => lm.size > 0)
+    for (i <- 0 until layerModels.length){
+      outputs(i) = layerModels(i).eval(if (i==0) data else outputs(i - 1))
+      if (i < lastIndex && topology.layerDropoutProb > 0) {
+        layerMasks(i) = if (layerModels(i).size > 0) {
+          makeMask(outputs(i), topology.layerDropoutProb)
+        } else {
+          if (i==0) inputMask else layerMasks(i - 1)
+        }
+        applyMask(outputs(i), layerMasks(i))
+       }
+    }
     val deltas = new Array[BDM[Double]](layerModels.length)
     val error = outputs.last - target
     val L = layerModels.length - 1
@@ -210,6 +243,7 @@ class FeedForwardModel(val layerModels: Array[LayerModel], val topology: Topolog
     deltas(L) = error
     for (i <- (L - 1) to (0, -1)) {
       deltas(i) = layerModels(i + 1).prevDelta(deltas(i + 1), outputs(i + 1))
+      applyMask(deltas(i), layerMasks(i))
     }
     val grads = new Array[Vector](layerModels.length)
     for (i <- 0 until layerModels.length) {
@@ -233,7 +267,31 @@ class FeedForwardModel(val layerModels: Array[LayerModel], val topology: Topolog
     val outerError = Bsum(error :* error) / 2
     /* NB! dividing by the number of instances in
      * the batch to be transparent for the optimizer */
+    //println(outerError / realBatchSize)
     outerError / realBatchSize
+  }
+
+  private def makeMask(data: BDM[Double], dropoutProb: Double): BitSet = {
+    val mask = scala.collection.mutable.BitSet(data.size)
+    mask(data.size) = false
+    var k = 0
+    while (k < data.size) {
+      if (rand.nextDouble() > dropoutProb) {
+        mask(k) = true
+      }
+      k += 1
+    }
+    mask
+  }
+
+  private def applyMask(data: BDM[Double], mask: BitSet): Unit = {
+    var k = 0
+    while (k < data.size && mask != null) {
+      if (mask(k) == false) {
+        data.data(k) = 0.0
+      }
+      k += 1
+    }
   }
 
   def weights(): Vector = {
