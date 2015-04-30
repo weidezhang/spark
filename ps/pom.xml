@@ -6,9 +6,10 @@
         <artifactId>spark-parent_2.10</artifactId>
         <groupId>org.apache.spark</groupId>
         <version>1.4.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
     </parent>
     <modelVersion>4.0.0</modelVersion>
-    <artifactId>ps</artifactId>
+    <artifactId>ps_2.10</artifactId>
     <packaging>jar</packaging>
     <name>Parameter Server on Spark</name>
     <url>http://spark.apache.org/</url>

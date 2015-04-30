@@ -17,10 +17,6 @@
 
 package org.apache.spark.ps
 
-trait PSMaster {
-  def start(): Unit
+object HelloWorldTest {
 
-  def isReady: Boolean
-
-  def masterUrl: String
 }

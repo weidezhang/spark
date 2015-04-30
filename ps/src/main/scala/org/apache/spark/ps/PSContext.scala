@@ -20,5 +20,15 @@ package org.apache.spark.ps
 import org.apache.spark.SparkContext
 
 class PSContext(sc: SparkContext) {
+  var psMaster: PSMaster = null
 
+  def start(): Unit = {
+    psMaster.start()
+
+    while(!psMaster.isReady) {
+      this.wait(100)
+    }
+  }
+
+  def masterUrl = psMaster.masterUrl
 }

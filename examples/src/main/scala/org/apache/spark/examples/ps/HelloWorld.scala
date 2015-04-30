@@ -15,12 +15,36 @@
  * limitations under the License.
  */
 
-package org.apache.spark.ps
+package org.apache.spark.examples.ps
 
-trait PSMaster {
-  def start(): Unit
+import org.apache.spark.ps.PSContext
+import org.apache.spark.ps.local.LocalPSClient
+import org.apache.spark.{SparkConf, SparkContext}
 
-  def isReady: Boolean
 
-  def masterUrl: String
+object HelloWorld {
+  def main(args: Array[String]): Unit = {
+    val conf = new SparkConf().setAppName("Hello World to Test Parameter Server")
+    val sc = new SparkContext(conf)
+
+    val rdd = sc.parallelize(Array(1, 2, 3, 4, 5), 5)
+
+
+    val psContext = new PSContext(sc)
+    psContext.start()
+    val masterUrl = psContext.masterUrl
+
+    rdd.mapPartitionsWithIndex { (indexId, iter) =>
+      val arr = iter.toArray
+      val client = new LocalPSClient(indexId, masterUrl)
+
+      for (i <- 0 to 10) {
+        val a = client.get(1)
+        val b
+      }
+
+      arr.iterator
+    }
+
+  }
 }
