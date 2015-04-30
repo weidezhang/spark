@@ -147,6 +147,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     */
   def clock(): Unit = {
     currentClock += 1
+    endpoint.send(Clock(currentClock))
   }
 
   def setInitialized(): Unit = {
