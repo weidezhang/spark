@@ -19,6 +19,7 @@ package org.apache.spark.ps
 
 import org.apache.spark.SparkContext
 
+// TODO: initialized parameters
 class PSContext(sc: SparkContext) {
   var psMaster: PSMaster = null
 

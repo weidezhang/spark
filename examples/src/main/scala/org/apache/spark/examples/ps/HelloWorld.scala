@@ -40,7 +40,11 @@ object HelloWorld {
 
       for (i <- 0 to 10) {
         val a = client.get(1)
-        val b
+        println(s"partition $indexId get value " + a.mkString(" "))
+        val delta = Array(1.0)
+
+        client.update(1, delta)
+        client.clock()
       }
 
       arr.iterator
