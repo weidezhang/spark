@@ -25,11 +25,16 @@ private[local] object LocalPSMessage {
 
 
   // TODO: add tableId
+  case class ClientRegistered(clock: Int) extends LocalPSMessage
   case class RowRequest(clientId: Int, rowId: Int, clock: Int) extends LocalPSMessage
   // TODO: change rowData to generic type
   case class RowRequestReply(clientId: Int, rowId: Int, clock: Int, rowData: Array[Double])
     extends LocalPSMessage
   case class UpdateRow(clientId: Int, rowId: Int, clock: Int, rowDelta: Array[Double])
     extends LocalPSMessage
-  case class Clock(clock: Int)
+  case class Clock(clientId: Int, clock: Int) extends LocalPSMessage
+
+
+  case object ConnectServer extends LocalPSMessage
+  case class ServerConnected(serverId: Int) extends LocalPSMessage
 }

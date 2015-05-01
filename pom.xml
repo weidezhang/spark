@@ -89,6 +89,7 @@
     <module>core</module>
     <module>bagel</module>
     <module>graphx</module>
+    <module>ps</module>
     <module>mllib</module>
     <module>tools</module>
     <module>network/common</module>
@@ -107,7 +108,6 @@
     <module>examples</module>
     <module>repl</module>
     <module>launcher</module>
-    <module>ps</module>
   </modules>
 
   <properties>

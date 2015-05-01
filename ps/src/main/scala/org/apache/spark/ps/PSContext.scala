@@ -18,10 +18,11 @@
 package org.apache.spark.ps
 
 import org.apache.spark.SparkContext
+import org.apache.spark.ps.local.LocalPSMaster
 
 // TODO: initialized parameters
 class PSContext(sc: SparkContext) {
-  var psMaster: PSMaster = null
+  var psMaster: PSMaster = new LocalPSMaster(sc, 1)
 
   def start(): Unit = {
     psMaster.start()
@@ -31,5 +32,5 @@ class PSContext(sc: SparkContext) {
     }
   }
 
-  def masterUrl = psMaster.masterUrl
+  def masterUrl: String = psMaster.masterUrl
 }

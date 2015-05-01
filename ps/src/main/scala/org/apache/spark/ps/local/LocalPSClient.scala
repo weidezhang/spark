@@ -21,62 +21,63 @@ package org.apache.spark.ps.local
 import scala.util.{Failure, Success}
 import scala.concurrent.Future
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext.Implicits.global
 
-import org.apache.spark.{Logging, SparkEnv}
+import org.apache.spark.SparkEnv
 import org.apache.spark.ps.PSClient
-import org.apache.spark.rpc.{RpcEndpointRef, ThreadSafeRpcEndpoint, RpcEnv}
+import org.apache.spark.rpc.{RpcEndpointRef, RpcEnv}
 import LocalPSMessage._
 
 class LocalPSClientEndpoint(
   override val rpcEnv: RpcEnv,
   client: LocalPSClient,
   masterUrl: String
-  ) extends ThreadSafeRpcEndpoint with Logging {
+  ) extends LoggingRpcEndpoint {
 
+  // TODO: need to consider use String(url) or RpcEndpointRef
   private var servers: Option[Array[RpcEndpointRef]] = None
   var master: Option[RpcEndpointRef] = None
 
   override def onStart(): Unit = {
-    import scala.concurrent.ExecutionContext.Implicits.global
     logInfo("PSClient connecting to : " + master)
     rpcEnv.asyncSetupEndpointRefByURI(masterUrl) onComplete  {
-      case Success(ref) => {
+      case Success(ref) =>
         master = Some(ref)
         ref.send(RegisterClient(client.clientId))
-      }
+
       case Failure(e) => logError(s"Cannot register with driver: $masterUrl", e)
     }
   }
 
   // TODO: avoid send message twice
-  override def receive: PartialFunction[Any, Unit] = {
-    case ServerUrls(urls) => {
-      Future.sequence(urls.map(rpcEnv.asyncSetupEndpointRefByURI)) onComplete  {
-        case Success(refs) => {
-          servers = Some(refs)
+  override def receiveWithLog: PartialFunction[LocalPSMessage, Unit] = {
+    case ServerUrls(urls) =>
+      Future.sequence(urls.iterator.map(rpcEnv.asyncSetupEndpointRefByURI)) onComplete  {
+        case Success(refs) =>
+          servers = Some(refs.toArray)
           client.setInitialized()
-        }
+
         case Failure(e) => logError(s"Cannot get server refs: " + urls.mkString(", "), e)
       }
-    }
-    case RowRequestReply(clientId, rowId, clock, rowData) => {
+
+    case RowRequestReply(clientId, rowId, clock, rowData) =>
       require(clientId == client.clientId,
         s"send rowData to wrong client: $clientId vs ${client.clientId}")
       client.rows(rowId) = rowData
-    }
+
 
 
     // redirect message to server
     // TODO: find a way to avoid this, call functions directly
-    case UpdateRow(clientId, rowId, clock, rowDelta) => {
+    case UpdateRow(clientId, rowId, clock, rowDelta) =>
       serverByRowId(rowId).send(UpdateRow(clientId, rowId, clock, rowDelta))
-    }
-    case RowRequest(clientId, rowId, clock) => {
+
+    case RowRequest(clientId, rowId, clock) =>
       serverByRowId(rowId).send(RowRequest(clientId, rowId, clock))
-    }
-    case Clock(clock) => {
-      clockAllServers(clock)
-    }
+
+    case Clock(clientId, clock) =>
+      clockAllServers(clientId, clock)
+
   }
 
   // TODO: use other hash functions if neccessary
@@ -87,10 +88,10 @@ class LocalPSClientEndpoint(
     servers.get(serverIndex)
   }
 
-  private def clockAllServers(clock: Int)  {
+  private def clockAllServers(clientId: Int, clock: Int)  {
     require(servers.isDefined, "must initialized first before clock")
     servers.get.foreach { server =>
-      server.send(Clock(clock))
+      server.send(Clock(clientId, clock))
     }
   }
 }
@@ -106,7 +107,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
 
   def init(): Unit = {
     val rpcEnv = SparkEnv.get.rpcEnv
-    endpoint = rpcEnv.setupEndpoint("PSClient", new LocalPSClientEndpoint(
+    endpoint = rpcEnv.setupEndpoint(s"PSClient_$clientId", new LocalPSClientEndpoint(
       rpcEnv, this, masterUrl))
     while (!initialized) {
       this.wait(100)
@@ -147,7 +148,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     */
   def clock(): Unit = {
     currentClock += 1
-    endpoint.send(Clock(currentClock))
+    endpoint.send(Clock(clientId, currentClock))
   }
 
   def setInitialized(): Unit = {
