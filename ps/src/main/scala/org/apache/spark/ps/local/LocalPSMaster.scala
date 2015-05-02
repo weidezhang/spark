@@ -20,7 +20,7 @@ package org.apache.spark.ps.local
 import org.apache.spark.{SparkEnv, Logging, SparkContext}
 import org.apache.spark.ps.PSMaster
 import org.apache.spark.ps.local.LocalPSMessage._
-import org.apache.spark.rpc.{RpcCallContext, RpcEndpointRef, RpcEnv}
+import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcCallContext, RpcEndpointRef, RpcEnv}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{Success, Failure}
@@ -30,7 +30,7 @@ class LocalPSMasterEndpoint(
   override val rpcEnv: RpcEnv,
   serverUrls: Array[String],
   master: LocalPSMaster
-  ) extends LoggingRpcEndpoint {
+  ) extends ThreadSafeRpcEndpoint with Logging  {
   private val serverReady = serverUrls.map(_ => false)
 
 
@@ -44,13 +44,13 @@ class LocalPSMasterEndpoint(
     }
   }
 
-  override def receiveWithLog: PartialFunction[LocalPSMessage, Unit] = {
+  override def receive: PartialFunction[LocalPSMessage, Unit] = {
     case ServerConnected(serverId) =>
       serverReady(serverId) = true
       setReady()
   }
 
-  override def receiveAndReplyWithLog(context: RpcCallContext)
+  override def receiveAndReply(context: RpcCallContext)
   : PartialFunction[LocalPSMessage, Unit] = {
     case RegisterClient(_) =>
       context.reply(ServerUrls(serverUrls))

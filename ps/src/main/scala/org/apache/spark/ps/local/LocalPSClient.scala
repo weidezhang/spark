@@ -24,15 +24,16 @@ import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 
 import org.apache.spark.SparkEnv
+import org.apache.spark.Logging
 import org.apache.spark.ps.PSClient
-import org.apache.spark.rpc.{RpcEndpointRef, RpcEnv}
-import LocalPSMessage._
+import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcEndpointRef, RpcEnv}
+import org.apache.spark.ps.local.LocalPSMessage._
 
 class LocalPSClientEndpoint(
   override val rpcEnv: RpcEnv,
   client: LocalPSClient,
   masterUrl: String
-  ) extends LoggingRpcEndpoint {
+  ) extends ThreadSafeRpcEndpoint with Logging {
 
   // TODO: need to consider use String(url) or RpcEndpointRef
   private var servers: Option[Array[RpcEndpointRef]] = None
@@ -50,7 +51,7 @@ class LocalPSClientEndpoint(
   }
 
   // TODO: avoid send message twice
-  override def receiveWithLog: PartialFunction[LocalPSMessage, Unit] = {
+  override def receive: PartialFunction[LocalPSMessage, Unit] = {
     case ServerUrls(urls) =>
       Future.sequence(urls.iterator.map(rpcEnv.asyncSetupEndpointRefByURI)) onComplete  {
         case Success(refs) =>

@@ -17,15 +17,16 @@
 
 package org.apache.spark.ps.local
 
+import org.apache.spark.Logging
 import org.apache.spark.ps.VectorClock
 import org.apache.spark.ps.local.LocalPSMessage._
-import org.apache.spark.rpc.{RpcEndpointRef, RpcCallContext, RpcEnv}
+import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcEndpointRef, RpcCallContext, RpcEnv}
 
 
 import scala.collection.mutable
 
 class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
-  extends LoggingRpcEndpoint {
+  extends ThreadSafeRpcEndpoint with Logging  {
   private val row = Array(0.0)
   private val ROW_ID = 0
   private val clientIds = mutable.Set.empty[Int]
@@ -33,7 +34,7 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
   private val pendingClients = mutable.HashMap.empty[Int, RpcEndpointRef]
 
 
-  override def receiveAndReplyWithLog(context: RpcCallContext)
+  override def receiveAndReply(context: RpcCallContext)
   : PartialFunction[LocalPSMessage, Unit] = {
     case ConnectServer =>
       context.reply(ServerConnected(serverId))
