@@ -20,7 +20,7 @@ package org.apache.spark.ps.local
 private[local] sealed trait LocalPSMessage extends Serializable
 
 private[local] object LocalPSMessage {
-  case class RegisterClient(clientId: Int) extends LocalPSMessage
+  case class RegisterClient(clientId: Int, url: String) extends LocalPSMessage
   case class ServerUrls(urls: Array[String]) extends LocalPSMessage
 
 

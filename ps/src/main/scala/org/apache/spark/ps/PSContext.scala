@@ -27,9 +27,6 @@ class PSContext(sc: SparkContext) {
   def start(): Unit = {
     psMaster.start()
 
-    while(!psMaster.isReady) {
-      this.wait(100)
-    }
   }
 
   def masterUrl: String = psMaster.masterUrl

@@ -17,10 +17,14 @@
 
 package org.apache.spark.ps.local
 
+import scala.util.{Success, Failure}
+
 import org.apache.spark.Logging
 import org.apache.spark.ps.VectorClock
 import org.apache.spark.ps.local.LocalPSMessage._
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcEndpointRef, RpcCallContext, RpcEnv}
+import scala.concurrent.ExecutionContext.Implicits.global
+
 
 
 import scala.collection.mutable
@@ -29,42 +33,72 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
   extends ThreadSafeRpcEndpoint with Logging  {
   private val row = Array(0.0)
   private val ROW_ID = 0
-  private val clientIds = mutable.Set.empty[Int]
+  private val clients = mutable.HashMap.empty[Int, (String, RpcEndpointRef)]
   private val vectorClock = new VectorClock
-  private val pendingClients = mutable.HashMap.empty[Int, RpcEndpointRef]
+  private val pendingClients = mutable.Set.empty[Int]
 
 
   override def receiveAndReply(context: RpcCallContext)
-  : PartialFunction[LocalPSMessage, Unit] = {
+  : PartialFunction[Any, Unit] = {
     case ConnectServer =>
       context.reply(ServerConnected(serverId))
 
-    case RegisterClient(clientId) =>
-      if (!clientIds.contains(clientId)) {
+    case RegisterClient(clientId, url) =>
+      if (!clients.contains(clientId)) {
         vectorClock.addClock(clientId, 0)
       }
-      clientIds += clientId
+      logDebug(s"get registered from client: $clientId, $url, " +
+        LocalPSMaster.getUriByRef(rpcEnv, context.sender))
+      clients += clientId -> (url, context.sender)
       context.reply(ClientRegistered(vectorClock(clientId)))
 
     case RowRequest(clientId, rowId, clock) =>
       val minClock = vectorClock.getMinClock()
+      logDebug(s"server $serverId get row request: $clientId $rowId $clock")
+      context.reply(true)
+      logDebug(s"server $serverId has reply row request: $clientId $rowId $clock")
+
+
       if (minClock >= clock) {
-        context.reply(RowRequestReply(clientId, ROW_ID, minClock, row))
+        // workaround for don't have send with reply method,
+        // must call context.reply(true) first, otherwise this row reply is ignored
+        logDebug(s"server $serverId can reply this " +
+          s"row request directly: $clientId $rowId $clock")
+        replyRow(clientId, RowRequestReply(clientId, ROW_ID, minClock, row))
       } else {
-        pendingClients(clientId) = context.sender
+        pendingClients += clientId
       }
 
+  }
+
+  override def receive: PartialFunction[Any, Unit] = {
+    case UpdateRow(clientId, rowId, clock, rowDelta) =>
+      logDebug(s"server $serverId received update: $clientId, $rowId, $clock " +
+        rowDelta.mkString(" "))
+      row(0) += rowDelta(0)
+
     case Clock(clientId, clock) =>
+      logDebug(s"server $serverId received clock: $clientId $clock")
       val minClock = vectorClock.tickUntil(clientId, clock)
       // if min clock has changed(return no zero value)
       if (minClock != 0) {
-        pendingClients.foreach { case (cid, clientRef) =>
-          clientRef.send(RowRequestReply(cid, ROW_ID, minClock, row))
+        logDebug(s"server $serverId can reply row requests " +
+          s"after clock change: $clientId $clock")
+        pendingClients.foreach { clientId =>
+          replyRow(clientId, RowRequestReply(clientId, ROW_ID, minClock, row))
         }
+        pendingClients.clear()
       }
+  }
 
-    case UpdateRow(clientId, rowId, clock, rowDelta) =>
-      row(0) += rowDelta(0)
-
+  private def replyRow(clientId: Int, reply: RowRequestReply) = {
+    require(clients.contains(clientId), s"must contain $clientId")
+    rpcEnv.asyncSetupEndpointRefByURI(clients(clientId)._1) onComplete {
+      case Success(ref) =>
+        ref.send(reply)
+      case Failure(e) =>
+        logError(s"server $serverId can't get client ref: $clientId", e)
+    }
+    clients(clientId)._2.send(reply)
   }
 }

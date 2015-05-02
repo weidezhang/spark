@@ -27,28 +27,32 @@ object HelloWorld {
     val conf = new SparkConf().setAppName("Hello World to Test Parameter Server")
     val sc = new SparkContext(conf)
 
-    val rdd = sc.parallelize(Array(1, 2, 3, 4, 5), 5)
+    val rdd = sc.parallelize(Array(1, 2, 3, 4, 5), 3)
 
 
     val psContext = new PSContext(sc)
     psContext.start()
+    println("ps context has been started")
     val masterUrl = psContext.masterUrl
+    println("rdd's number of partitions: " + rdd.partitions.length)
 
     rdd.mapPartitionsWithIndex { (indexId, iter) =>
       val arr = iter.toArray
       val client = new LocalPSClient(indexId, masterUrl)
 
       for (i <- 0 to 10) {
-        val a = client.get(1)
+        val a = client.get(0)
         println(s"partition $indexId get value " + a.mkString(" "))
         val delta = Array(1.0)
 
-        client.update(1, delta)
+        client.update(0, delta)
         client.clock()
       }
 
       arr.iterator
-    }
+    }.count()
+
+    println("finish run parameter server job")
 
   }
 }

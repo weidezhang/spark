@@ -38,27 +38,25 @@ class LocalPSMasterEndpoint(
     import scala.concurrent.ExecutionContext.Implicits.global
     serverUrls.foreach { serverUrl =>
       rpcEnv.asyncSetupEndpointRefByURI(serverUrl) onComplete {
-        case Success(serverRef) => serverRef.send(ConnectServer)
+        case Success(serverRef) =>
+          val serverConnected = serverRef.askWithRetry[ServerConnected](ConnectServer)
+          serverReady(serverConnected.serverId) = true
+          setReady()
         case Failure(e) => logError("Cannot get server by url: " + serverUrl, e)
       }
     }
   }
 
-  override def receive: PartialFunction[LocalPSMessage, Unit] = {
-    case ServerConnected(serverId) =>
-      serverReady(serverId) = true
-      setReady()
-  }
-
   override def receiveAndReply(context: RpcCallContext)
-  : PartialFunction[LocalPSMessage, Unit] = {
-    case RegisterClient(_) =>
+  : PartialFunction[Any, Unit] = {
+    case _: RegisterClient =>
       context.reply(ServerUrls(serverUrls))
   }
 
   private def setReady(): Unit = {
     if (serverReady.forall(b => b)) {
       master.setReady()
+//      master.notify()
     }
   }
 }
@@ -85,6 +83,9 @@ class LocalPSMaster(
     logInfo("Start local master")
     masterRef = Some(rpcEnv.setupEndpoint("PSMaster",
       new LocalPSMasterEndpoint(rpcEnv, serverRefs.toArray, this)))
+    while (!isReady) {
+      Thread.sleep(100)
+    }
   }
 
   def masterUrl: String = {

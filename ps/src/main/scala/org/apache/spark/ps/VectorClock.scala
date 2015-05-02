@@ -19,7 +19,9 @@ package org.apache.spark.ps
 
 import scala.collection.mutable
 
-class VectorClock {
+import org.apache.spark.Logging
+
+class VectorClock extends Logging {
   private var minClock = -1
   private val id2clock = mutable.HashMap.empty[Int, Int]
 
@@ -32,20 +34,24 @@ class VectorClock {
   }
 
   def addClock(id: Int, clock: Int): Unit = {
-    id2clock(id) = 0
+    id2clock(id) = clock
     if (minClock == -1 || clock < minClock) {
       minClock = clock
     }
+    logDebug(s"add clock: ($id, $clock), min clock is :$minClock")
   }
 
   def tick(id: Int): Int = {
-    id2clock(id) = id2clock(id) + 1
-    if (isUniqueMin(id)) {
+    val clockChanged = if (isUniqueMin(id)) {
       minClock += 1
+      logDebug(s"tick clock $id to ${id2clock(id) + 1}, and change min clock to $minClock")
       minClock
     } else {
+      logDebug(s"tick clock $id to ${id2clock(id) + 1}, and don't change min clock: $minClock")
       0
     }
+    id2clock(id) = id2clock(id) + 1
+    clockChanged
   }
 
   def tickUntil(id: Int, clock: Int): Int = {
@@ -70,7 +76,10 @@ class VectorClock {
     id2clock(id)
   }
 
-  def getMinClock(): Int = minClock
+  def getMinClock(): Int = {
+    logDebug(s"current min clock is $minClock")
+    minClock
+  }
 
   private def isUniqueMin(id: Int): Boolean = {
     if (id2clock(id) != minClock) {
