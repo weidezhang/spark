@@ -87,11 +87,11 @@
       <artifactId>spark-streaming-flume_${scala.binary.version}</artifactId>
       <version>${project.version}</version>
     </dependency>
-    <!--<dependency>-->
-      <!--<groupId>org.apache.spark</groupId>-->
-      <!--<artifactId>spark-streaming-mqtt_${scala.binary.version}</artifactId>-->
-      <!--<version>${project.version}</version>-->
-    <!--</dependency>-->
+    <dependency>
+      <groupId>org.apache.spark</groupId>
+      <artifactId>spark-streaming-mqtt_${scala.binary.version}</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency>
       <groupId>org.apache.spark</groupId>
       <artifactId>ps_${scala.binary.version}</artifactId>
