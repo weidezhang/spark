@@ -147,11 +147,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     }
 
     def updateRow(rowId: Int, clock: Int, rowDelta: T): Unit = {
-      serverByRowId(rowId).ask[Boolean](RowRequest(clientId, rowId, clock)) onComplete {
-        case Success(b) =>
-          logDebug(s"Client $clientId: row request returns $b")
-        case Failure(e) => logError(s"Client $clientId cannot get row request", e)
-      }
+      serverByRowId(rowId).send(UpdateRow(clientId, rowId, clock, rowDelta))
     }
 
     def rowRequest(rowId: Int, clock: Int): Unit = {

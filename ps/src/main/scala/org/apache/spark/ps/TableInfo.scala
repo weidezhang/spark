@@ -17,17 +17,4 @@
 
 package org.apache.spark.ps
 
-import org.apache.spark.SparkContext
-import org.apache.spark.ps.local.LocalPSMaster
-
-// TODO: initialized parameters
-class PSContext(sc: SparkContext) {
-  var psMaster: PSMaster = new LocalPSMaster(sc, 1)
-
-  def start(tableInfo: TableInfo): Unit = {
-    psMaster.start(tableInfo)
-
-  }
-
-  def masterUrl: String = psMaster.masterUrl
-}
+case class TableInfo(rowSize: Int) extends Serializable

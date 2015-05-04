@@ -17,11 +17,13 @@
 
 package org.apache.spark.examples.ps
 
-import org.apache.spark.ps.PSContext
+import org.apache.spark.ps.{TableInfo, PSContext}
 import org.apache.spark.ps.local.LocalPSClient
 import org.apache.spark.{SparkConf, SparkContext}
 
-
+/**
+ * Hello World Of Parameter Server on Spark
+ */
 object HelloWorld {
   def main(args: Array[String]): Unit = {
     val conf = new SparkConf().setAppName("Hello World to Test Parameter Server")
@@ -31,7 +33,7 @@ object HelloWorld {
 
 
     val psContext = new PSContext(sc)
-    psContext.start()
+    psContext.start(TableInfo(1))
     println("ps context has been started")
     val masterUrl = psContext.masterUrl
     println("rdd's number of partitions: " + rdd.partitions.length)

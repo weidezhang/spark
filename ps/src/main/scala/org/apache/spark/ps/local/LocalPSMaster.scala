@@ -18,7 +18,7 @@
 package org.apache.spark.ps.local
 
 import org.apache.spark.{SparkEnv, Logging, SparkContext}
-import org.apache.spark.ps.PSMaster
+import org.apache.spark.ps.{TableInfo, PSMaster}
 import org.apache.spark.ps.local.LocalPSMessage._
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcCallContext, RpcEndpointRef, RpcEnv}
 
@@ -73,10 +73,10 @@ class LocalPSMaster(
   private val rpcEnv = sc.env.rpcEnv
   private var ready = false
 
-  def start(): Unit = {
+  def start(tableInfo: TableInfo): Unit = {
     logInfo("Start local servers")
     for (i <- 0 until numServers) {
-      val serverRef = rpcEnv.setupEndpoint(s"PSServer_$i", new LocalPSServer(rpcEnv, i))
+      val serverRef = rpcEnv.setupEndpoint(s"PSServer_$i", new LocalPSServer(rpcEnv, i, tableInfo.rowSize))
       serverRefs += LocalPSMaster.getUriByRef(rpcEnv, serverRef)
     }
 

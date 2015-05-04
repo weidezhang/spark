@@ -18,7 +18,7 @@
 package org.apache.spark.ps
 
 trait PSMaster {
-  def start(): Unit
+  def start(tableInfo: TableInfo): Unit
 
   def isReady: Boolean
 

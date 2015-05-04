@@ -29,10 +29,10 @@ import scala.concurrent.ExecutionContext.Implicits.global
 
 import scala.collection.mutable
 
-class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
+class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int, rowSize: Int)
   extends ThreadSafeRpcEndpoint with Logging  {
-  private val row = Array(0.0)
-  private val ROW_ID = 0
+  private val row = new Array[Double](rowSize)
+  private val ROW_ID = serverId
   private val clients = mutable.HashMap.empty[Int, String]
   private val vectorClock = new VectorClock
   private val pendingClients = mutable.Set.empty[Int]
@@ -75,7 +75,9 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
     case UpdateRow(clientId, rowId, clock, rowDelta) =>
       logDebug(s"server $serverId received update: $clientId, $rowId, $clock " +
         rowDelta.mkString(" "))
-      row(0) += rowDelta(0)
+      rowDelta.zipWithIndex.foreach { case (elem, index) =>
+        row(index) += elem
+      }
 
     case Clock(clientId, clock) =>
       logDebug(s"server $serverId received clock: $clientId $clock")
