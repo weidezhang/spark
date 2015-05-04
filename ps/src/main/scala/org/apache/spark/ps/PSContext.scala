@@ -17,17 +17,40 @@
 
 package org.apache.spark.ps
 
+import com.sun.javaws.exceptions.InvalidArgumentException
 import org.apache.spark.SparkContext
-import org.apache.spark.ps.local.LocalPSMaster
+import org.apache.spark.ps.local.{LocalPSConfig, LocalPSMaster}
+import org.apache.spark.rdd.RDD
 
 // TODO: initialized parameters
-class PSContext(sc: SparkContext) {
-  var psMaster: PSMaster = new LocalPSMaster(sc, 1)
+class PSContext(sc: SparkContext, config: PSConfig) {
+  var psMaster: PSMaster = config match {
+    case _: LocalPSConfig =>
+      new LocalPSMaster(config)
+    case _ =>
+      throw new InvalidArgumentException("Unknown PS Config")
+  }
 
-  def start(tableInfo: TableInfo): Unit = {
-    psMaster.start(tableInfo)
+  def start(): Unit = {
+    psMaster.start()
+  }
 
+  def stop(): Unit = {
+    psMaster.stop()
   }
 
   def masterUrl: String = psMaster.masterUrl
+}
+
+
+abstract class PSContext(sc: SparkContext, config: PSConfig) {
+  protected val psMaster: PSMaster
+
+  def start(): Unit
+
+  def uploadParams(initialParams: Array[Array[Double]]): Unit
+  def downloadParams(): Array[Array[Double]]
+
+  def loadParams(path: String, numPartitions: Int): Unit
+  def saveParams(path: String): Unit
 }

@@ -15,10 +15,6 @@
  * limitations under the License.
  */
 
-package org.apache.spark.ps
+package org.apache.spark.ps.local
 
-trait PSMaster {
-  def start(tableInfo: TableInfo): Unit
-
-  def masterInfo: PSMasterInfo
-}
+case class LocalPSConfig(rowNum: Int, rowSize: Int, serverNum: Int)

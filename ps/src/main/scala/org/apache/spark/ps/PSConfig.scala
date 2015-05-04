@@ -17,8 +17,4 @@
 
 package org.apache.spark.ps
 
-trait PSMaster {
-  def start(tableInfo: TableInfo): Unit
-
-  def masterInfo: PSMasterInfo
-}
+abstract class PSConfig
