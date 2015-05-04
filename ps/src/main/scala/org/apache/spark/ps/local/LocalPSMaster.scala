@@ -108,7 +108,7 @@ class LocalPSMaster(
 }
 
 object LocalPSMaster {
-  private val actorSystemName = SparkEnv.driverActorSystemName
+  val actorSystemName = SparkEnv.driverActorSystemName
 
   def getUriByRef(rpcEnv: RpcEnv, rpcEndpointRef: RpcEndpointRef): String = {
     rpcEnv.uriOf(actorSystemName, rpcEndpointRef.address, rpcEndpointRef.name)

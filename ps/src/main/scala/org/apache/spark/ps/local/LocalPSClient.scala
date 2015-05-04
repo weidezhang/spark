@@ -29,102 +29,24 @@ import org.apache.spark.ps.PSClient
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcEndpointRef, RpcEnv}
 import org.apache.spark.ps.local.LocalPSMessage._
 
-class LocalPSClientEndpoint(
-  override val rpcEnv: RpcEnv,
-  client: LocalPSClient,
-  masterUrl: String
-  ) extends ThreadSafeRpcEndpoint with Logging {
 
-  // TODO: need to consider use String(url) or RpcEndpointRef
-  private var servers: Option[Array[RpcEndpointRef]] = None
-  var master: Option[RpcEndpointRef] = None
-
-  override def onStart(): Unit = {
-    logInfo("PSClient connecting to : " + masterUrl)
-    val url = LocalPSMaster.getUriByRef(rpcEnv, self)
-    rpcEnv.asyncSetupEndpointRefByURI(masterUrl) onComplete  {
-      case Success(ref) =>
-        master = Some(ref)
-        val urls = ref.askWithRetry[ServerUrls](RegisterClient(client.clientId, url)).urls
-        Future.sequence(urls.iterator.map(rpcEnv.asyncSetupEndpointRefByURI)) onComplete  {
-          case Success(refs) =>
-            servers = Some(refs.toArray)
-            val clocks = servers.get.map { serverRef =>
-              serverRef.askWithRetry[ClientRegistered](RegisterClient(client.clientId, url))
-            }
-            val maxClock = clocks.maxBy(r => r.clock).clock
-            if (maxClock > client.getClock) {
-              logInfo("set client's clock to max clock returned by server" +
-                s"currentClock: ${client.getClock}, maxClock: $maxClock")
-              client.setClock(maxClock)
-            }
-
-            client.setInitialized()
-
-          case Failure(e) => logError(s"Client ${client.clientId} cannot get server refs: " + urls.mkString(", "), e)
-        }
-
-      case Failure(e) => logError(s"Cannot register with driver: $masterUrl", e)
-    }
-  }
-
-  // TODO: avoid send message twice
-  override def receive: PartialFunction[Any, Unit] = {
-    case RowRequestReply(clientId, rowId, clock, rowData) =>
-      require(clientId == client.clientId,
-        s"send rowData to wrong client: $clientId vs ${client.clientId}")
-      logDebug(s"Client ${client.clientId} get reply from server: $rowId, " + rowData.mkString(" "))
-      client.rows(rowId) = rowData
-
-
-    // redirect message to server
-    // TODO: find a way to avoid this, call functions directly
-    case UpdateRow(clientId, rowId, clock, rowDelta) =>
-      serverByRowId(rowId).send(UpdateRow(clientId, rowId, clock, rowDelta))
-
-    case RowRequest(clientId, rowId, clock) =>
-      serverByRowId(rowId).ask[Boolean](RowRequest(clientId, rowId, clock)) onComplete {
-        case Success(b) =>
-          logDebug(s"Client ${client.clientId}: row request returns $b")
-        case Failure(e) => logError(s"Client ${client.clientId} cannot get row request", e)
-      }
-
-    case Clock(clientId, clock) =>
-      clockAllServers(clientId, clock)
-
-  }
-
-  // TODO: use other hash functions if neccessary
-  private def serverByRowId(rowId: Int): RpcEndpointRef = {
-    require(servers.isDefined, "must initialized first before row request")
-    val totalRows = servers.get.length
-    val serverIndex = rowId % totalRows
-    servers.get(serverIndex)
-  }
-
-  private def clockAllServers(clientId: Int, clock: Int)  {
-    require(servers.isDefined, "must initialized first before clock")
-    servers.get.foreach { server =>
-      server.send(Clock(clientId, clock))
-    }
-  }
-}
 
 class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
+
   override type T = Array[Double]
 
   private var initialized = false
-  val rows = mutable.HashMap.empty[Int, Array[Double]]
-  var endpoint: RpcEndpointRef = null
-  var currentClock: Int = 0
+  private val rows = mutable.HashMap.empty[Int, Array[Double]]
+  private var endpoint: LocalPSClientEndpoint = null
+  private var currentClock: Int = 0
 
   init()
 
-
   def init(): Unit = {
     val rpcEnv = SparkEnv.get.rpcEnv
-    endpoint = rpcEnv.setupEndpoint(s"PSClient_$clientId", new LocalPSClientEndpoint(
-      rpcEnv, this, masterUrl))
+    endpoint = new LocalPSClientEndpoint(
+      rpcEnv, masterUrl)
+    rpcEnv.setupEndpoint(s"PSClient_$clientId", endpoint)
     while (!initialized) {
       Thread.sleep(100)
     }
@@ -137,7 +59,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
       rows.remove(rowId)
     }
 
-    endpoint.send(RowRequest(clientId, rowId, currentClock))
+    endpoint.rowRequest(rowId, currentClock)
 
     while (!rows.contains(rowId)) {
       Thread.sleep(100)
@@ -154,7 +76,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     *  use `reduceFunc` to reduce these `delta`s frist
     */
   def update(rowId: Int, delta: T): Unit = {
-    endpoint.send(UpdateRow(clientId, rowId, currentClock, delta))
+    endpoint.updateRow(rowId, currentClock, delta)
   }
 
   //  // update multiple parameters at the same time, use the same `reduceFunc`.
@@ -164,18 +86,87 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     */
   def clock(): Unit = {
     currentClock += 1
-    endpoint.send(Clock(clientId, currentClock))
+    endpoint.clock(currentClock)
   }
 
 
-  def getClock: Int = currentClock
-  def setClock(clock: Int) {
-    currentClock = clock
+  class LocalPSClientEndpoint(
+    override val rpcEnv: RpcEnv,
+    masterUrl: String
+    ) extends ThreadSafeRpcEndpoint with Logging {
+
+    // TODO: need to consider use String(url) or RpcEndpointRef
+    private var servers: Option[Array[RpcEndpointRef]] = None
+    private val actorSystemName = SparkEnv.executorActorSystemName
+
+    var master: Option[RpcEndpointRef] = None
+
+    override def onStart(): Unit = {
+      logInfo("PSClient connecting to : " + masterUrl)
+      val url = LocalPSMaster.getUriByRef(rpcEnv, self)
+      rpcEnv.asyncSetupEndpointRefByURI(masterUrl) onComplete  {
+        case Success(ref) =>
+          master = Some(ref)
+          val urls = ref.askWithRetry[ServerUrls](RegisterClient(clientId, url)).urls
+          Future.sequence(urls.iterator.map(rpcEnv.asyncSetupEndpointRefByURI)) onComplete  {
+            case Success(refs) =>
+              servers = Some(refs.toArray)
+              val clocks = servers.get.map { serverRef =>
+                serverRef.askWithRetry[ClientRegistered](RegisterClient(clientId, url))
+              }
+              val maxClock = clocks.maxBy(r => r.clock).clock
+              if (maxClock > currentClock) {
+                logInfo("set client's clock to max clock returned by server" +
+                  s"currentClock: $currentClock, maxClock: $maxClock")
+                currentClock = maxClock
+              }
+
+              initialized = true
+
+            case Failure(e) => logError(s"Client $clientId cannot get server refs: " + urls.mkString(", "), e)
+          }
+
+        case Failure(e) => logError(s"Cannot register with driver: $masterUrl", e)
+      }
+    }
+
+    override def receive: PartialFunction[Any, Unit] = {
+      case RowRequestReply(cid, rowId, clock, rowData) =>
+        require(cid == clientId,
+          s"send rowData to wrong client: $cid vs $clientId")
+        logDebug(s"Client $clientId get reply from server: $rowId, " + rowData.mkString(" "))
+        rows(rowId) = rowData
+    }
+
+    // TODO: use other hash functions if necessary
+    private def serverByRowId(rowId: Int): RpcEndpointRef = {
+      require(servers.isDefined, "must initialized first before row request")
+      val totalRows = servers.get.length
+      val serverIndex = rowId % totalRows
+      servers.get(serverIndex)
+    }
+
+    def updateRow(rowId: Int, clock: Int, rowDelta: T): Unit = {
+      serverByRowId(rowId).ask[Boolean](RowRequest(clientId, rowId, clock)) onComplete {
+        case Success(b) =>
+          logDebug(s"Client $clientId: row request returns $b")
+        case Failure(e) => logError(s"Client $clientId cannot get row request", e)
+      }
+    }
+
+    def rowRequest(rowId: Int, clock: Int): Unit = {
+      serverByRowId(rowId).ask[Boolean](RowRequest(clientId, rowId, clock)) onComplete {
+        case Success(b) =>
+          logDebug(s"Client $clientId: row request returns $b")
+        case Failure(e) => logError(s"Client $clientId cannot get row request", e)
+      }
+    }
+
+    def clock(clock: Int): Unit = {
+      require(servers.isDefined, "must initialized first before clock")
+      servers.get.foreach { server =>
+        server.send(Clock(clientId, clock))
+      }
+    }
   }
-
-  def setInitialized(): Unit = {
-    initialized = true
-  }
-
-
 }

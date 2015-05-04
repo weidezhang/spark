@@ -33,7 +33,7 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
   extends ThreadSafeRpcEndpoint with Logging  {
   private val row = Array(0.0)
   private val ROW_ID = 0
-  private val clients = mutable.HashMap.empty[Int, (String, RpcEndpointRef)]
+  private val clients = mutable.HashMap.empty[Int, String]
   private val vectorClock = new VectorClock
   private val pendingClients = mutable.Set.empty[Int]
 
@@ -49,7 +49,7 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
       }
       logDebug(s"get registered from client: $clientId, $url, " +
         LocalPSMaster.getUriByRef(rpcEnv, context.sender))
-      clients += clientId -> (url, context.sender)
+      clients += clientId -> url
       context.reply(ClientRegistered(vectorClock(clientId)))
 
     case RowRequest(clientId, rowId, clock) =>
@@ -93,12 +93,11 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int)
 
   private def replyRow(clientId: Int, reply: RowRequestReply) = {
     require(clients.contains(clientId), s"must contain $clientId")
-    rpcEnv.asyncSetupEndpointRefByURI(clients(clientId)._1) onComplete {
+    rpcEnv.asyncSetupEndpointRefByURI(clients(clientId)) onComplete {
       case Success(ref) =>
         ref.send(reply)
       case Failure(e) =>
         logError(s"server $serverId can't get client ref: $clientId", e)
     }
-    clients(clientId)._2.send(reply)
   }
 }
