@@ -43,9 +43,15 @@ trait PSClient {
 //  // update multiple parameters at the same time, use the same `reduceFunc`.
 //  def multiUpdate(keys: Array[String], delta: Array[T], reduceFunc: (T, T) => T: Unit
 
-  /** advance clock to indicate that current iteration is finished.
-    */
+  /**
+   * advance clock to indicate that current iteration is finished.
+   */
   def clock(): Unit
+
+  /**
+   * stop parameter server client
+   */
+  def stop(): Unit
 }
 
 

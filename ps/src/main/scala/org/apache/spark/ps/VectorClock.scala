@@ -81,6 +81,21 @@ class VectorClock extends Logging {
     minClock
   }
 
+  def removeClock(id: Int): Int = {
+    if (id2clock.size == 1) {
+      id2clock.remove(id)
+      minClock = -1
+      minClock
+    } else if (isUniqueMin(id)) {
+      id2clock.remove(id)
+      minClock = id2clock.values.min
+      minClock
+    } else {
+      id2clock.remove(id)
+      0
+    }
+  }
+
   private def isUniqueMin(id: Int): Boolean = {
     if (id2clock(id) != minClock) {
       return false

@@ -23,8 +23,8 @@ import org.apache.spark.rdd.RDD
 
 import scala.reflect.ClassTag
 
-// TODO: initialized parameters
 class PSContext(sc: SparkContext, config: PSConfig) {
+  private var initialized = false
   var psMaster: PSMaster = config match {
     case c: LocalPSConfig =>
       new LocalPSMaster(sc, c)
@@ -34,6 +34,7 @@ class PSContext(sc: SparkContext, config: PSConfig) {
 
   def start(): Unit = {
     psMaster.start()
+    initialized = true
   }
 
   def stop(): Unit = {
@@ -43,11 +44,14 @@ class PSContext(sc: SparkContext, config: PSConfig) {
   def runPSJob[T: ClassTag, U: ClassTag](
       rdd: RDD[T])
     (func: (Int, Array[T], PSClient) => Iterator[U]): RDD[U] = {
+    require(initialized, "must call PSContext.start() to initialize before runPSJob")
     val masterInfo = psMaster.masterInfo
     rdd.mapPartitionsWithIndex { (pid, iter) =>
       val arr = iter.toArray
       val client = PSClient(pid, masterInfo)
-      func(pid, arr, client)
+      val result = func(pid, arr, client)
+      client.stop()
+      result
     }
   }
 

@@ -69,6 +69,19 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int, rowSize: Int)
         pendingClients += clientId
       }
 
+    case UnRegisterClient(clientId) =>
+      if (clients.contains(clientId)) {
+        clients.remove(clientId)
+        pendingClients -= clientId
+        val minClock = vectorClock.removeClock(clientId)
+        if (minClock > 0) {
+          logDebug(s"server $serverId can reply row requests " +
+            s"after unregister client: $clientId")
+          replyPendingRowRequest(minClock)
+        }
+      }
+      context.reply(ClientUnRegistered)
+
   }
 
   override def receive: PartialFunction[Any, Unit] = {
@@ -86,10 +99,7 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int, rowSize: Int)
       if (minClock != 0) {
         logDebug(s"server $serverId can reply row requests " +
           s"after clock change: $clientId $clock")
-        pendingClients.foreach { clientId =>
-          replyRow(clientId, RowRequestReply(clientId, ROW_ID, minClock, row))
-        }
-        pendingClients.clear()
+        replyPendingRowRequest(minClock)
       }
   }
 
@@ -101,5 +111,12 @@ class LocalPSServer(override val rpcEnv: RpcEnv, serverId: Int, rowSize: Int)
       case Failure(e) =>
         logError(s"server $serverId can't get client ref: $clientId", e)
     }
+  }
+
+  private def replyPendingRowRequest(minClock: Int): Unit = {
+    pendingClients.foreach { clientId =>
+      replyRow(clientId, RowRequestReply(clientId, ROW_ID, minClock, row))
+    }
+    pendingClients.clear()
   }
 }

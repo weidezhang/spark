@@ -90,6 +90,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
   }
 
   def stop(): Unit = {
+    clientEndpoint.unRegisterClient()
     clientEndpointRef.foreach(rpcEnv.stop)
   }
 
@@ -119,7 +120,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
               }
               val maxClock = clocks.maxBy(r => r.clock).clock
               if (maxClock > currentClock) {
-                logInfo("set client's clock to max clock returned by server" +
+                logInfo("Set client's clock to max clock returned by server" +
                   s"currentClock: $currentClock, maxClock: $maxClock")
                 currentClock = maxClock
               }
@@ -136,14 +137,14 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     override def receive: PartialFunction[Any, Unit] = {
       case RowRequestReply(cid, rowId, clock, rowData) =>
         require(cid == clientId,
-          s"send rowData to wrong client: $cid vs $clientId")
+          s"Send rowData to wrong client: $cid vs $clientId")
         logDebug(s"Client $clientId get reply from server: $rowId, " + rowData.mkString(" "))
         rows(rowId) = rowData
     }
 
     // TODO: use other hash functions if necessary
     private def serverByRowId(rowId: Int): RpcEndpointRef = {
-      require(servers.isDefined, "must initialized first before row request")
+      require(servers.isDefined, "Must initialized first before row request")
       val totalRows = servers.get.length
       val serverIndex = rowId % totalRows
       servers.get(serverIndex)
@@ -162,9 +163,22 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     }
 
     def clock(clock: Int): Unit = {
-      require(servers.isDefined, "must initialized first before clock")
+      require(servers.isDefined, "Must initialized first before clock")
       servers.get.foreach { server =>
         server.send(Clock(clientId, clock))
+      }
+    }
+
+    def unRegisterClient(): Unit = {
+      require(servers.isDefined, "Must initialized first before unregister client")
+      servers.get.foreach { server =>
+        server.ask(UnRegisterClient(clientId)) onComplete {
+          // TODO: can't match Success(ClientUnRegistered), fix this
+          case Success(_) =>
+            logDebug("Successfully unregister client " + clientId)
+          case Failure(e) =>
+            logError("Can't unregister client " + clientId, e)
+        }
       }
     }
   }

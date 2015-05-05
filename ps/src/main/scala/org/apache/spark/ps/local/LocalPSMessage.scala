@@ -33,6 +33,8 @@ private[local] object LocalPSMessage {
   case class UpdateRow(clientId: Int, rowId: Int, clock: Int, rowDelta: Array[Double])
     extends LocalPSMessage
   case class Clock(clientId: Int, clock: Int) extends LocalPSMessage
+  case class UnRegisterClient(clientId: Int) extends LocalPSMessage
+  case object ClientUnRegistered extends LocalPSMessage
 
 
   case object ConnectServer extends LocalPSMessage
