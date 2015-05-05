@@ -17,10 +17,13 @@
 
 package org.apache.spark.ps
 
+import org.apache.spark.{SparkProcessEnv, SparkEnv}
 import org.apache.spark.ps.local.{LocalPSClient, LocalPSMasterInfo}
 
 trait PSClient {
-  def init(): Unit
+  protected val processEnv = SparkEnv.get.initProcessEnv(initProcessEnv)
+
+  def initProcessEnv(): SparkProcessEnv
 
   /** get parameter indexed by key from parameter server
     */

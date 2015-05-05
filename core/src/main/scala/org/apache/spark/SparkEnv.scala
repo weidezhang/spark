@@ -85,6 +85,7 @@ class SparkEnv (
   private[spark] val hadoopJobMetadata = new MapMaker().softValues().makeMap[String, Any]()
 
   private var driverTmpDirToDelete: Option[String] = None
+  private var processEnv: Option[SparkProcessEnv] = None
 
   private[spark] def stop() {
     isStopped = true
@@ -144,6 +145,23 @@ class SparkEnv (
     synchronized {
       val key = (pythonExec, envVars)
       pythonWorkers.get(key).foreach(_.releaseWorker(worker))
+    }
+  }
+
+  private[spark]
+  def initProcessEnv(initFunc: () => SparkProcessEnv): SparkProcessEnv = {
+    synchronized {
+      val env = processEnv.getOrElse(initFunc())
+      processEnv = Some(env)
+      env
+    }
+  }
+
+  private[spark]
+  def getProcessEnv: SparkProcessEnv = {
+    synchronized {
+      require(processEnv.isDefined, "Must initialize process env before get")
+      processEnv.get
     }
   }
 }

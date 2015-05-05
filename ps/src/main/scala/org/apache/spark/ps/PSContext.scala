@@ -41,8 +41,7 @@ class PSContext(sc: SparkContext, config: PSConfig) {
     psMaster.stop()
   }
 
-  def runPSJob[T: ClassTag, U: ClassTag](
-      rdd: RDD[T])
+  def runPSJob[T: ClassTag, U: ClassTag](rdd: RDD[T])
     (func: (Int, Array[T], PSClient) => Iterator[U]): RDD[U] = {
     require(initialized, "must call PSContext.start() to initialize before runPSJob")
     val masterInfo = psMaster.masterInfo

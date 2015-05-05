@@ -23,8 +23,7 @@ import scala.concurrent.Future
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext.Implicits.global
 
-import org.apache.spark.SparkEnv
-import org.apache.spark.Logging
+import org.apache.spark.{EmptySparkProcessEnv, SparkProcessEnv, SparkEnv, Logging}
 import org.apache.spark.ps.PSClient
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcEndpointRef, RpcEnv}
 import org.apache.spark.ps.local.LocalPSMessage._
@@ -35,21 +34,22 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
 
   private var initialized = false
   private val rows = mutable.HashMap.empty[Int, Array[Double]]
-  private var clientEndpoint: LocalPSClientEndpoint = null
+  private val rpcEnv: RpcEnv = SparkEnv.get.rpcEnv
+  private val clientEndpoint = new LocalPSClientEndpoint(
+    rpcEnv, masterUrl)
   private var currentClock: Int = 0
-  private val rpcEnv = SparkEnv.get.rpcEnv
-  private var clientEndpointRef: Option[RpcEndpointRef] = None
+  private val clientEndpointRef = rpcEnv.setupEndpoint(s"PSClient_$clientId", clientEndpoint)
 
   init()
 
   def init(): Unit = {
-    clientEndpoint = new LocalPSClientEndpoint(
-      rpcEnv, masterUrl)
-    val ref = rpcEnv.setupEndpoint(s"PSClient_$clientId", clientEndpoint)
-    clientEndpointRef = Some(ref)
     while (!initialized) {
       Thread.sleep(100)
     }
+  }
+
+  def initProcessEnv(): SparkProcessEnv = {
+    EmptySparkProcessEnv
   }
 
   /** get parameter indexed by key from parameter server
@@ -91,7 +91,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
 
   def stop(): Unit = {
     clientEndpoint.unRegisterClient()
-    clientEndpointRef.foreach(rpcEnv.stop)
+    rpcEnv.stop(clientEndpointRef)
   }
 
 
