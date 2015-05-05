@@ -17,10 +17,11 @@
 
 package org.apache.spark.ps.local
 
+import org.apache.spark.ps.common.VectorClock
+
 import scala.util.{Success, Failure}
 
 import org.apache.spark.Logging
-import org.apache.spark.ps.VectorClock
 import org.apache.spark.ps.local.LocalPSMessage._
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcEndpointRef, RpcCallContext, RpcEnv}
 import scala.concurrent.ExecutionContext.Implicits.global

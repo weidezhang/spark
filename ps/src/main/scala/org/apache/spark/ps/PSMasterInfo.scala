@@ -17,4 +17,8 @@
 
 package org.apache.spark.ps
 
+/**
+ * Information of parameter server master.
+ * Client use this information to establish connection with master.
+ */
 abstract class PSMasterInfo extends Serializable

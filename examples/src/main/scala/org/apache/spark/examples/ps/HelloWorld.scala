@@ -17,7 +17,7 @@
 
 package org.apache.spark.examples.ps
 
-import org.apache.spark.ps.{TableInfo, PSContext}
+import org.apache.spark.ps.PSContext
 import org.apache.spark.ps.local.{LocalPSConfig, LocalPSClient}
 import org.apache.spark.{SparkConf, SparkContext}
 
@@ -53,5 +53,7 @@ object HelloWorld {
 
     println("finish run parameter server job")
 
+    psContext.stop()
+    sc.stop()
   }
 }

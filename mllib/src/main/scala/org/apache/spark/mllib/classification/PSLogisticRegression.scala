@@ -21,11 +21,15 @@ import org.apache.spark.SparkContext
 import org.apache.spark.mllib.linalg.BLAS._
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
-import org.apache.spark.ps.{TableInfo, PSContext}
-import org.apache.spark.ps.local.{LocalPSConfig, LocalPSClient}
+import org.apache.spark.ps.PSContext
+import org.apache.spark.ps.local.LocalPSConfig
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.random.BernoulliSampler
 
+/**
+ * Implementation of logistic regression based on parameter server on Spark
+ * to demonstrate how to implement algorithms with parameter server.
+ */
 object PSLogisticRegression {
   def train(
     sc: SparkContext,
@@ -33,38 +37,62 @@ object PSLogisticRegression {
     numIterations: Int,
     stepSize: Double,
     miniBatchFraction: Double): LogisticRegressionModel = {
+    // initialize weights
     val numFeatures = input.map(_.features.size).first()
+    val initialWeights = new Array[Double](numFeatures)
 
+    // initialized and start parameter server context
     val psContext = new PSContext(sc, LocalPSConfig(1, numFeatures, 1))
     psContext.start()
 
-    val weights: RDD[Array[Double]] = psContext.runPSJob(input)(  (index, arr, client) => {
+    // upload initial weights to parameter server
+    psContext.uploadParams(Array(initialWeights))
+
+    // run logistic regression algorithm on input data
+    psContext.runPSJob(input)(  (index, arr, client) => {
       val sampler = new BernoulliSampler[LabeledPoint](miniBatchFraction)
 
+      // for each iteration, compute delta and update weights
       for (i <- 0 to numIterations) {
+        // get weights from parameter server
         val w = Vectors.dense(client.get(0))
+
+        // sum of delta of current partition
         val delta = Vectors.dense(new Array[Double](numFeatures))
 
         sampler.setSeed(i + 42)
         sampler.sample(arr.toIterator).foreach { point =>
+          // compute current weights
           val weights = w.copy
           axpy(1.0, delta, weights)
+
+          // compute delta
           val data = point.features
           val label = point.label
           val margin = -1.0 * dot(data, weights)
           val multiplier = (1.0 / (1.0 + math.exp(margin))) - label
           axpy((-1) * stepSize / math.sqrt(i + 1) * multiplier, data, delta)
         }
+
+        // update delta to parameter server
         client.update(0, delta.toArray)
+
+        // end of current iteration
         client.clock()
       }
 
-      Iterator(client.get(0))
-    })
+      Iterator()
+    }).count()
 
-    val w = Vectors.dense(weights.first())
+    // download weights from parameter server
+    val weights = psContext.downloadParams()(0)
+
+    // stop parameter server context
+    psContext.stop()
+
+    // construct LogisticRegressionModel
+    val w = Vectors.dense(weights)
     val intercept = 0.0
-
     new LogisticRegressionModel(w, intercept).clearThreshold()
   }
 }

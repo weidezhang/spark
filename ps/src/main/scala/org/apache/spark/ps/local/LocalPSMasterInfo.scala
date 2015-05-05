@@ -19,4 +19,4 @@ package org.apache.spark.ps.local
 
 import org.apache.spark.ps.PSMasterInfo
 
-case class LocalPSMasterInfo(masterUrl: String) extends PSMasterInfo
+case class LocalPSMasterInfo(masterUrl: String, rowNum: Int) extends PSMasterInfo

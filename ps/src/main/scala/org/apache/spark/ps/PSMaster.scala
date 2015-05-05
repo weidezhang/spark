@@ -17,10 +17,28 @@
 
 package org.apache.spark.ps
 
+
+/**
+ * Master of Parameter Server.
+ * Master is responsible to coordinate server and client
+ * and keep information of servers and tables.
+ * Client needs to communicate with master to get information of servers.
+ */
 trait PSMaster {
+  /**
+   * Start parameter server master.
+   * This function will be called when PSContext is being started.
+   */
   def start(): Unit
 
+  /**
+   * Information of this parameter server master.
+   * Client use this information to establish connection with master.
+   */
   def masterInfo: PSMasterInfo
 
+  /**
+   * Stop parameter server master when there is no need for parameter server.
+   */
   def stop(): Unit
 }

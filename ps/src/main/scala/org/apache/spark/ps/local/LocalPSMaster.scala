@@ -17,14 +17,12 @@
 
 package org.apache.spark.ps.local
 
+import scala.collection.mutable.ArrayBuffer
+
 import org.apache.spark.{SparkEnv, Logging, SparkContext}
-import org.apache.spark.ps.{PSMasterInfo, TableInfo, PSMaster}
+import org.apache.spark.ps.{PSMasterInfo, PSMaster}
 import org.apache.spark.ps.local.LocalPSMessage._
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcCallContext, RpcEndpointRef, RpcEnv}
-
-import scala.collection.mutable.ArrayBuffer
-import scala.util.{Success, Failure}
-
 
 
 /**
@@ -56,7 +54,7 @@ class LocalPSMaster(
 
   def masterInfo: PSMasterInfo = {
     require(isReady, "can't get master url before master get ready")
-    LocalPSMasterInfo(LocalPSMaster.getUriByRef(rpcEnv, masterRef.get))
+    LocalPSMasterInfo(LocalPSMaster.getUriByRef(rpcEnv, masterRef.get), config.rowNum)
   }
 
   def isReady: Boolean = ready

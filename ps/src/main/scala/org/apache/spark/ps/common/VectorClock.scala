@@ -15,11 +15,11 @@
  * limitations under the License.
  */
 
-package org.apache.spark.ps
-
-import scala.collection.mutable
+package org.apache.spark.ps.common
 
 import org.apache.spark.Logging
+
+import scala.collection.mutable
 
 class VectorClock extends Logging {
   private var minClock = -1

@@ -23,33 +23,37 @@ import org.apache.spark.ps.local.{LocalPSClient, LocalPSMasterInfo}
 trait PSClient {
   protected val processEnv = SparkEnv.get.initProcessEnv(initProcessEnv)
 
+  /**
+   * Initialize a process environment in SparkEnv
+   * to enable clients perform some actions in a process level.
+   * Implementations that need process level actions
+   * can inherit {{SparkProcessEnv}} and
+   * let this function return a object of the derived class.
+   * Process environment will only be initialized once.
+   * If it has been initialized, nothing will be done if this function gets called.
+   * @return the process env initialized
+   */
   def initProcessEnv(): SparkProcessEnv
 
-  /** get parameter indexed by key from parameter server
-    */
+  /**
+   * Get parameter indexed by key from parameter server
+   */
   def get(rowId: Int): Array[Double]
 
-//  // get multiple parameters from parameter server
-//  def multiGet[T](keys: Array[String]): Array[T]
-
-  // add parameter indexed by `key` by `delta`,
-  // if multiple `delta` to update on the same parameter,
-  // use `reduceFunc` to reduce these `delta`s frist.
-
-
-  /** add parameter indexed by `key` by `delta`
-   *  if multiple `delta` to update on the same parameter
-   *  use `reduceFunc` to reduce these `delta`s frist
+  /**
+   * Add parameter indexed by `key` by `delta`.
    */
   def update(rowId: Int, delta: Array[Double]): Unit
 
-//  // update multiple parameters at the same time, use the same `reduceFunc`.
-//  def multiUpdate(keys: Array[String], delta: Array[T], reduceFunc: (T, T) => T: Unit
-
   /**
-   * advance clock to indicate that current iteration is finished.
+   * Advance clock to indicate that current iteration is finished.
    */
   def clock(): Unit
+
+  /**
+   * Number of rows
+   */
+  def rowNum: Int
 
   /**
    * stop parameter server client
@@ -59,7 +63,15 @@ trait PSClient {
 
 
 object PSClient {
+  /**
+   * Construct a new parameter client based on clientId and masterInfo.
+   * New implementations of parameter server needs to add an case in this function
+   * to construct specific parameter server client.
+   * @param clientId: id of parameter client, corresponding to the partition id
+   * @param masterInfo: master information. Use masterInfo to establish connection with master.
+   * @return a parameter server client
+   */
   def apply(clientId: Int, masterInfo: PSMasterInfo): PSClient = masterInfo match {
-    case info: LocalPSMasterInfo => new LocalPSClient(clientId, info.masterUrl)
+    case info: LocalPSMasterInfo => new LocalPSClient(clientId, info.masterUrl, info.rowNum)
   }
 }

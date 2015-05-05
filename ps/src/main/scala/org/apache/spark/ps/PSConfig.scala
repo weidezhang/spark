@@ -17,4 +17,10 @@
 
 package org.apache.spark.ps
 
-abstract class PSConfig
+/**
+ * Configuration of parameter server.
+ * Configuration is used to start PSContext.
+ */
+trait PSConfig {
+  def rowNum: Int
+}

@@ -30,7 +30,7 @@ import org.apache.spark.ps.local.LocalPSMessage._
 
 
 
-class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
+class LocalPSClient(val clientId: Int, val masterUrl: String, val rowNum: Int) extends PSClient {
 
   private var initialized = false
   private val rows = mutable.HashMap.empty[Int, Array[Double]]
@@ -78,9 +78,6 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
   def update(rowId: Int, delta: Array[Double]): Unit = {
     clientEndpoint.updateRow(rowId, currentClock, delta)
   }
-
-  //  // update multiple parameters at the same time, use the same `reduceFunc`.
-  //  def multiUpdate(keys: Array[String], delta: Array[T], reduceFunc: (T, T) => T: Unit
 
   /** advance clock to indicate that current iteration is finished.
     */
