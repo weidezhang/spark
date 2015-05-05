@@ -17,13 +17,14 @@
 
 package org.apache.spark.ps
 
+import org.apache.spark.ps.local.{LocalPSClient, LocalPSMasterInfo}
+
 trait PSClient {
-  type T
   def init(): Unit
 
   /** get parameter indexed by key from parameter server
     */
-  def get(rowId: Int): T
+  def get(rowId: Int): Array[Double]
 
 //  // get multiple parameters from parameter server
 //  def multiGet[T](keys: Array[String]): Array[T]
@@ -37,7 +38,7 @@ trait PSClient {
    *  if multiple `delta` to update on the same parameter
    *  use `reduceFunc` to reduce these `delta`s frist
    */
-  def update(rowId: Int, delta: T): Unit
+  def update(rowId: Int, delta: Array[Double]): Unit
 
 //  // update multiple parameters at the same time, use the same `reduceFunc`.
 //  def multiUpdate(keys: Array[String], delta: Array[T], reduceFunc: (T, T) => T: Unit
@@ -45,4 +46,11 @@ trait PSClient {
   /** advance clock to indicate that current iteration is finished.
     */
   def clock(): Unit
+}
+
+
+object PSClient {
+  def apply(clientId: Int, masterInfo: PSMasterInfo): PSClient = masterInfo match {
+    case info: LocalPSMasterInfo => new LocalPSClient(clientId, info.masterUrl)
+  }
 }

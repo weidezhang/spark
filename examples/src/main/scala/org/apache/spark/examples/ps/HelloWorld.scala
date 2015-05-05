@@ -18,7 +18,7 @@
 package org.apache.spark.examples.ps
 
 import org.apache.spark.ps.{TableInfo, PSContext}
-import org.apache.spark.ps.local.LocalPSClient
+import org.apache.spark.ps.local.{LocalPSConfig, LocalPSClient}
 import org.apache.spark.{SparkConf, SparkContext}
 
 /**
@@ -32,27 +32,24 @@ object HelloWorld {
     val rdd = sc.parallelize(Array(1, 2, 3, 4, 5), 3)
 
 
-    val psContext = new PSContext(sc)
-    psContext.start(TableInfo(1))
+    val psContext = new PSContext(sc, LocalPSConfig(1, 1, 1))
+    psContext.start()
     println("ps context has been started")
-    val masterUrl = psContext.masterUrl
     println("rdd's number of partitions: " + rdd.partitions.length)
 
-    rdd.mapPartitionsWithIndex { (indexId, iter) =>
-      val arr = iter.toArray
-      val client = new LocalPSClient(indexId, masterUrl)
+    psContext.runPSJob(rdd)( (pid, arr, client) => {
 
       for (i <- 0 to 10) {
         val a = client.get(0)
-        println(s"partition $indexId get value " + a.mkString(" "))
+        println(s"partition $pid get value " + a.mkString(" "))
         val delta = Array(1.0)
 
         client.update(0, delta)
         client.clock()
       }
 
-      arr.iterator
-    }.count()
+      Iterator(client.get(0))
+    }).count()
 
     println("finish run parameter server job")
 

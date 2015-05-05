@@ -15,12 +15,8 @@
  * limitations under the License.
  */
 
-package org.apache.spark.ps
+package org.apache.spark.ps.local
 
-trait PSMaster {
-  def start(): Unit
+import org.apache.spark.ps.PSMasterInfo
 
-  def masterInfo: PSMasterInfo
-
-  def stop(): Unit
-}
+case class LocalPSMasterInfo(masterUrl: String) extends PSMasterInfo

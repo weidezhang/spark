@@ -33,20 +33,20 @@ import org.apache.spark.ps.local.LocalPSMessage._
 
 class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
 
-  override type T = Array[Double]
-
   private var initialized = false
   private val rows = mutable.HashMap.empty[Int, Array[Double]]
-  private var endpoint: LocalPSClientEndpoint = null
+  private var clientEndpoint: LocalPSClientEndpoint = null
   private var currentClock: Int = 0
+  private val rpcEnv = SparkEnv.get.rpcEnv
+  private var clientEndpointRef: Option[RpcEndpointRef] = None
 
   init()
 
   def init(): Unit = {
-    val rpcEnv = SparkEnv.get.rpcEnv
-    endpoint = new LocalPSClientEndpoint(
+    clientEndpoint = new LocalPSClientEndpoint(
       rpcEnv, masterUrl)
-    rpcEnv.setupEndpoint(s"PSClient_$clientId", endpoint)
+    val ref = rpcEnv.setupEndpoint(s"PSClient_$clientId", clientEndpoint)
+    clientEndpointRef = Some(ref)
     while (!initialized) {
       Thread.sleep(100)
     }
@@ -54,12 +54,12 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
 
   /** get parameter indexed by key from parameter server
     */
-  def get(rowId: Int): T = {
+  def get(rowId: Int): Array[Double] = {
     if (rows.contains(rowId)) {
       rows.remove(rowId)
     }
 
-    endpoint.rowRequest(rowId, currentClock)
+    clientEndpoint.rowRequest(rowId, currentClock)
 
     while (!rows.contains(rowId)) {
       Thread.sleep(100)
@@ -75,8 +75,8 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     *  if multiple `delta` to update on the same parameter
     *  use `reduceFunc` to reduce these `delta`s frist
     */
-  def update(rowId: Int, delta: T): Unit = {
-    endpoint.updateRow(rowId, currentClock, delta)
+  def update(rowId: Int, delta: Array[Double]): Unit = {
+    clientEndpoint.updateRow(rowId, currentClock, delta)
   }
 
   //  // update multiple parameters at the same time, use the same `reduceFunc`.
@@ -86,7 +86,11 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
     */
   def clock(): Unit = {
     currentClock += 1
-    endpoint.clock(currentClock)
+    clientEndpoint.clock(currentClock)
+  }
+
+  def stop(): Unit = {
+    clientEndpointRef.foreach(rpcEnv.stop)
   }
 
 
@@ -97,7 +101,6 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
 
     // TODO: need to consider use String(url) or RpcEndpointRef
     private var servers: Option[Array[RpcEndpointRef]] = None
-    private val actorSystemName = SparkEnv.executorActorSystemName
 
     var master: Option[RpcEndpointRef] = None
 
@@ -146,7 +149,7 @@ class LocalPSClient(val clientId: Int, val masterUrl: String) extends PSClient{
       servers.get(serverIndex)
     }
 
-    def updateRow(rowId: Int, clock: Int, rowDelta: T): Unit = {
+    def updateRow(rowId: Int, clock: Int, rowDelta: Array[Double]): Unit = {
       serverByRowId(rowId).send(UpdateRow(clientId, rowId, clock, rowDelta))
     }
 

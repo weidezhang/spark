@@ -18,7 +18,7 @@
 package org.apache.spark.ps.local
 
 import org.apache.spark.{SparkEnv, Logging, SparkContext}
-import org.apache.spark.ps.{TableInfo, PSMaster}
+import org.apache.spark.ps.{PSMasterInfo, TableInfo, PSMaster}
 import org.apache.spark.ps.local.LocalPSMessage._
 import org.apache.spark.rpc.{ThreadSafeRpcEndpoint, RpcCallContext, RpcEndpointRef, RpcEnv}
 
@@ -26,58 +26,24 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.{Success, Failure}
 
 
-class LocalPSMasterEndpoint(
-  override val rpcEnv: RpcEnv,
-  serverUrls: Array[String],
-  master: LocalPSMaster
-  ) extends ThreadSafeRpcEndpoint with Logging  {
-  private val serverReady = serverUrls.map(_ => false)
-
-
-  override def onStart(): Unit = {
-    import scala.concurrent.ExecutionContext.Implicits.global
-    serverUrls.foreach { serverUrl =>
-      rpcEnv.asyncSetupEndpointRefByURI(serverUrl) onComplete {
-        case Success(serverRef) =>
-          val serverConnected = serverRef.askWithRetry[ServerConnected](ConnectServer)
-          serverReady(serverConnected.serverId) = true
-          setReady()
-        case Failure(e) => logError("Cannot get server by url: " + serverUrl, e)
-      }
-    }
-  }
-
-  override def receiveAndReply(context: RpcCallContext)
-  : PartialFunction[Any, Unit] = {
-    case _: RegisterClient =>
-      context.reply(ServerUrls(serverUrls))
-  }
-
-  private def setReady(): Unit = {
-    if (serverReady.forall(b => b)) {
-      master.setReady()
-//      master.notify()
-    }
-  }
-}
 
 /**
  * start master and server
  */
 class LocalPSMaster(
   sc: SparkContext,
-  numServers: Int) extends PSMaster with Logging{
+  config: LocalPSConfig) extends PSMaster with Logging{
 
   private var masterRef: Option[RpcEndpointRef] = None
-  private val serverRefs =  ArrayBuffer[String]()
+  private val serverRefs =  ArrayBuffer[RpcEndpointRef]()
   private val rpcEnv = sc.env.rpcEnv
   private var ready = false
 
-  def start(tableInfo: TableInfo): Unit = {
+  def start(): Unit = {
     logInfo("Start local servers")
-    for (i <- 0 until numServers) {
-      val serverRef = rpcEnv.setupEndpoint(s"PSServer_$i", new LocalPSServer(rpcEnv, i, tableInfo.rowSize))
-      serverRefs += LocalPSMaster.getUriByRef(rpcEnv, serverRef)
+    for (i <- 0 until config.serverNum) {
+      val serverRef = rpcEnv.setupEndpoint(s"PSServer_$i", new LocalPSServer(rpcEnv, i, config.rowSize))
+      serverRefs += serverRef
     }
 
     logInfo("Start local master")
@@ -88,22 +54,47 @@ class LocalPSMaster(
     }
   }
 
-  def masterUrl: String = {
+  def masterInfo: PSMasterInfo = {
     require(isReady, "can't get master url before master get ready")
-    LocalPSMaster.getUriByRef(rpcEnv, masterRef.get)
+    LocalPSMasterInfo(LocalPSMaster.getUriByRef(rpcEnv, masterRef.get))
   }
 
   def isReady: Boolean = ready
 
-  def setReady(): Unit = {
-    ready = true
-  }
-
-
   def stop(): Unit = {
-
+    serverRefs.foreach(rpcEnv.stop)
+    masterRef.foreach(rpcEnv.stop)
   }
 
+  class LocalPSMasterEndpoint(
+    override val rpcEnv: RpcEnv,
+    serverRefs: Array[RpcEndpointRef],
+    master: LocalPSMaster
+    ) extends ThreadSafeRpcEndpoint with Logging  {
+    private val serverReady = serverRefs.map(_ => false)
+    private val serverUrls = serverRefs.map(LocalPSMaster.getUriByRef(rpcEnv, _))
+
+
+    override def onStart(): Unit = {
+      serverRefs.foreach { serverRef =>
+        val serverConnected = serverRef.askWithRetry[ServerConnected](ConnectServer)
+        serverReady(serverConnected.serverId) = true
+        setReady()
+      }
+    }
+
+    override def receiveAndReply(context: RpcCallContext)
+    : PartialFunction[Any, Unit] = {
+      case _: RegisterClient =>
+        context.reply(ServerUrls(serverUrls))
+    }
+
+    private def setReady(): Unit = {
+      if (serverReady.forall(b => b)) {
+        ready = true
+      }
+    }
+  }
 
 }
 

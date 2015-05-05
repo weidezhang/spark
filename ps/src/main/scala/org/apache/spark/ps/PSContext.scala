@@ -17,18 +17,19 @@
 
 package org.apache.spark.ps
 
-import com.sun.javaws.exceptions.InvalidArgumentException
 import org.apache.spark.SparkContext
 import org.apache.spark.ps.local.{LocalPSConfig, LocalPSMaster}
 import org.apache.spark.rdd.RDD
 
+import scala.reflect.ClassTag
+
 // TODO: initialized parameters
 class PSContext(sc: SparkContext, config: PSConfig) {
   var psMaster: PSMaster = config match {
-    case _: LocalPSConfig =>
-      new LocalPSMaster(config)
+    case c: LocalPSConfig =>
+      new LocalPSMaster(sc, c)
     case _ =>
-      throw new InvalidArgumentException("Unknown PS Config")
+      throw new IllegalArgumentException("Unknown PS Config")
   }
 
   def start(): Unit = {
@@ -39,18 +40,30 @@ class PSContext(sc: SparkContext, config: PSConfig) {
     psMaster.stop()
   }
 
-  def masterUrl: String = psMaster.masterUrl
-}
+  def runPSJob[T: ClassTag, U: ClassTag](
+      rdd: RDD[T])
+    (func: (Int, Array[T], PSClient) => Iterator[U]): RDD[U] = {
+    val masterInfo = psMaster.masterInfo
+    rdd.mapPartitionsWithIndex { (pid, iter) =>
+      val arr = iter.toArray
+      val client = PSClient(pid, masterInfo)
+      func(pid, arr, client)
+    }
+  }
 
-
-abstract class PSContext(sc: SparkContext, config: PSConfig) {
-  protected val psMaster: PSMaster
-
-  def start(): Unit
-
-  def uploadParams(initialParams: Array[Array[Double]]): Unit
-  def downloadParams(): Array[Array[Double]]
-
-  def loadParams(path: String, numPartitions: Int): Unit
-  def saveParams(path: String): Unit
+//  def uploadParams(initialParams: Array[Array[Double]]): Unit = {
+//
+//  }
+//
+//  def downloadParams(): Array[Array[Double]] = {
+//
+//  }
+//
+//  def loadParams(path: String, numPartitions: Int): Unit = {
+//
+//  }
+//
+//  def saveParams(path: String): Unit = {
+//
+//  }
 }

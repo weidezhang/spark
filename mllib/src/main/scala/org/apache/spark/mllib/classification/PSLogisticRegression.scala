@@ -22,7 +22,7 @@ import org.apache.spark.mllib.linalg.BLAS._
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.ps.{TableInfo, PSContext}
-import org.apache.spark.ps.local.LocalPSClient
+import org.apache.spark.ps.local.{LocalPSConfig, LocalPSClient}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.util.random.BernoulliSampler
 
@@ -35,13 +35,10 @@ object PSLogisticRegression {
     miniBatchFraction: Double): LogisticRegressionModel = {
     val numFeatures = input.map(_.features.size).first()
 
-    val psContext = new PSContext(sc)
-    psContext.start(TableInfo(numFeatures))
-    val masterUrl = psContext.masterUrl
+    val psContext = new PSContext(sc, LocalPSConfig(1, numFeatures, 1))
+    psContext.start()
 
-    val weights: RDD[Array[Double]] = input.mapPartitionsWithIndex { (index, iter) =>
-      val arr = iter.toArray
-      val client = new LocalPSClient(index, masterUrl)
+    val weights: RDD[Array[Double]] = psContext.runPSJob(input)(  (index, arr, client) => {
       val sampler = new BernoulliSampler[LabeledPoint](miniBatchFraction)
 
       for (i <- 0 to numIterations) {
@@ -63,7 +60,7 @@ object PSLogisticRegression {
       }
 
       Iterator(client.get(0))
-    }
+    })
 
     val w = Vectors.dense(weights.first())
     val intercept = 0.0

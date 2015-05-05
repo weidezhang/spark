@@ -17,4 +17,6 @@
 
 package org.apache.spark.ps.local
 
-case class LocalPSConfig(rowNum: Int, rowSize: Int, serverNum: Int)
+import org.apache.spark.ps.PSConfig
+
+case class LocalPSConfig(rowNum: Int, rowSize: Int, serverNum: Int) extends PSConfig
