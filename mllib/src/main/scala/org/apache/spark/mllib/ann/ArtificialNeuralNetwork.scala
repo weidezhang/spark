@@ -158,7 +158,7 @@ class ArtificialNeuralNetwork private[mllib](
   extends Serializable {
 
   private val gradient = new ANNLeastSquaresGradient(topology, batchSize)
-  private val updater = new ANNUpdater()
+  private val updater = new ANNOldUpdater()
   private val optimizer = new LBFGS(gradient, updater).
     setConvergenceTol(convergenceTol).
     setNumIterations(maxNumIterations)
@@ -536,7 +536,7 @@ private class ANNLeastSquaresGradient(val topology: Array[Int],
   }
 }
 
-private class ANNUpdater extends Updater {
+private class ANNOldUpdater extends Updater {
 
   override def compute(weightsOld: Vector,
                        gradient: Vector,
