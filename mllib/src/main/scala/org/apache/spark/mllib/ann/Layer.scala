@@ -147,7 +147,7 @@ object ActivationFunction {
     while (i < x.rows) {
       var j = 0
       while (j < x.cols) {
-        y(i, j) = func(x(i,j))
+        y(i, j) = func(x(i, j))
         j += 1
       }
       i += 1
@@ -160,7 +160,7 @@ object ActivationFunction {
     while (i < x1.rows) {
       var j = 0
       while (j < x1.cols) {
-        y(i, j) = func(x1(i,j), x2(i, j))
+        y(i, j) = func(x1(i, j), x2(i, j))
         j += 1
       }
       i += 1
@@ -185,7 +185,7 @@ class SoftmaxFunction extends ActivationFunction {
       var sum = 0.0
       i = 0
       while (i < x.rows) {
-        val res = Math.exp(x(i,j) - max)
+        val res = Math.exp(x(i, j) - max)
         y(i, j) = res
         sum += res
         i += 1
@@ -266,7 +266,7 @@ class FunctionalLayerModel private (val activationFunction: ActivationFunction
   private var e: BDM[Double] = null
   private lazy val dg = new Array[Double](0)
 
-  override def eval(data: BDM[Double]): BDM[Double] =  {
+  override def eval(data: BDM[Double]): BDM[Double] = {
     if (f == null || f.cols != data.cols) f = new BDM[Double](data.rows, data.cols)
     activationFunction.eval(data, f)
     f
@@ -563,7 +563,7 @@ class FeedForwardTrainer (topology: Topology, val inputSize: Int,
     lbfgs
   }
 
-  def setUpdater(value: Updater): FeedForwardTrainer =  {
+  def setUpdater(value: Updater): FeedForwardTrainer = {
     _updater = value
     updateUpdater(value)
     this
