@@ -33,7 +33,7 @@ import org.apache.spark.sql.DataFrame
  * Params for Multilayer Perceptron.
  */
 // TODO: ADD layers: Array[Int] and blockSize: Int params
-private[regression] trait MultilayerPerceptronRegressorParams extends PredictorParams
+private[ml] trait MultilayerPerceptronParams extends PredictorParams
 with HasSeed with HasMaxIter with HasTol {
   /**
    * Layer sizes including input and output.
@@ -68,6 +68,28 @@ with HasSeed with HasMaxIter with HasTol {
   /** @group getParam */
   final def getBlockSize: Int = $(blockSize)
 
+  /**
+   * Set the maximum number of iterations.
+   * Default is 100.
+   * @group setParam
+   */
+  def setMaxIter(value: Int): this.type = set(maxIter, value)
+
+  /**
+   * Set the convergence tolerance of iterations.
+   * Smaller value will lead to higher accuracy with the cost of more iterations.
+   * Default is 1E-4.
+   * @group setParam
+   */
+  def setTol(value: Double): this.type = set(tol, value)
+
+  /**
+   * Set the seed for weights initialization.
+   * Default is 11L.
+   * @group setParam
+   */
+  def setSeed(value: Long): this.type = set(seed, value)
+
   setDefault(seed -> 11L, maxIter -> 100, tol -> 1e-4, layers -> Array(1.0, 1.0), blockSize -> 1)
 }
 
@@ -80,7 +102,7 @@ with HasSeed with HasMaxIter with HasTol {
 @Experimental
 class MultilayerPerceptronRegressor (override val uid: String)
   extends Regressor[Vector, MultilayerPerceptronRegressor, MultilayerPerceptronRegressorModel]
-  with MultilayerPerceptronRegressorParams with Logging {
+  with MultilayerPerceptronParams with Logging {
 
   def this() = this(Identifiable.randomUID("mlpr"))
 
