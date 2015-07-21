@@ -22,7 +22,7 @@ import breeze.linalg.{argmax => Bargmax}
 import org.apache.spark.Logging
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.ml.PredictorParams
-import org.apache.spark.ml.param.{IntParam, DoubleArrayParam, ParamValidators, ParamMap}
+import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util.Identifiable
 import org.apache.spark.mllib.ann.{FeedForwardTopology, FeedForwardTrainer}
@@ -39,9 +39,9 @@ with HasSeed with HasMaxIter with HasTol {
    * Layer sizes including input and output.
    * @group param
    */
-  final val layers: DoubleArrayParam =
+  final val layers: IntArrayParam =
     // TODO: we need IntegerArrayParam!
-    new DoubleArrayParam(this, "layers",
+    new IntArrayParam(this, "layers",
       "Sizes of layers including input and output from bottom to the top." +
       " E.g., Array(780, 100, 10) means 780 inputs, " +
       "hidden layer with 100 neurons and output layer of 10 neurons."
@@ -57,10 +57,10 @@ with HasSeed with HasMaxIter with HasTol {
     ParamValidators.gt(0))
 
   /** @group setParam */
-  def setLayers(value: Array[Double]): this.type = set(layers, value)
+  def setLayers(value: Array[Int]): this.type = set(layers, value)
 
   /** @group getParam */
-  final def getLayers: Array[Double] = $(layers)
+  final def getLayers: Array[Int] = $(layers)
 
   /** @group setParam */
   def setBlockSize(value: Int): this.type = set(blockSize, value)
@@ -90,7 +90,7 @@ with HasSeed with HasMaxIter with HasTol {
    */
   def setSeed(value: Long): this.type = set(seed, value)
 
-  setDefault(seed -> 11L, maxIter -> 100, tol -> 1e-4, layers -> Array(1.0, 1.0), blockSize -> 1)
+  setDefault(seed -> 11L, maxIter -> 100, tol -> 1e-4, layers -> Array(1, 1), blockSize -> 1)
 }
 
 /**
@@ -119,7 +119,7 @@ class MultilayerPerceptronRegressor (override val uid: String)
   override protected def train(dataset: DataFrame): MultilayerPerceptronRegressorModel = {
     // TODO: find a better way to get Vectors
     val data = dataset.map { x => (x.getAs[Vector](0), x.getAs[Vector](1)) }
-    val myLayers = getLayers.map(_.toInt)
+    val myLayers = getLayers
     val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, false)
     val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
     FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol(getTol).setNumIterations(getMaxIter)

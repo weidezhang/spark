@@ -39,7 +39,7 @@ class MultilayerPerceptronClassifierSuite extends SparkFunSuite with MLlibTestSp
     val layers = Array[Int](2, 5, 2)
     val dataFrame = sqlContext.createDataFrame(rddData)
     val trainer = new MultilayerPerceptronClassifier("mlpc")
-      .setLayers(layers.map(_.toDouble))
+      .setLayers(layers)
       .setBlockSize(1)
       .setSeed(11L)
       .setMaxIter(100)
