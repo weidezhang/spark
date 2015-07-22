@@ -25,7 +25,7 @@ import org.apache.spark.sql.Row
 
 class MultilayerPerceptronClassifierSuite extends SparkFunSuite with MLlibTestSparkContext {
 
-  test("XOR") {
+  test("XOR function learning as 2-class classification problem") {
     val inputs = Array[Array[Double]](
       Array[Double](0, 0),
       Array[Double](0, 1),

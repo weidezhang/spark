@@ -21,18 +21,19 @@ import breeze.linalg.{argmax => Bargmax}
 
 import org.apache.spark.Logging
 import org.apache.spark.annotation.Experimental
-import org.apache.spark.ml.PredictorParams
+import org.apache.spark.ml.{Model, Transformer, Estimator, PredictorParams}
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.param.shared._
 import org.apache.spark.ml.util.Identifiable
 import org.apache.spark.mllib.ann.{FeedForwardTopology, FeedForwardTrainer}
-import org.apache.spark.mllib.linalg.Vector
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.mllib.linalg.{VectorUDT, Vector}
+import org.apache.spark.sql.{Row, DataFrame}
+import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{StructField, StructType}
 
 /**
  * Params for Multilayer Perceptron.
  */
-// TODO: ADD layers: Array[Int] and blockSize: Int params
 private[ml] trait MultilayerPerceptronParams extends PredictorParams
 with HasSeed with HasMaxIter with HasTol {
   /**
@@ -101,32 +102,53 @@ with HasSeed with HasMaxIter with HasTol {
  */
 @Experimental
 class MultilayerPerceptronRegressor (override val uid: String)
-  extends Regressor[Vector, MultilayerPerceptronRegressor, MultilayerPerceptronRegressorModel]
-  with MultilayerPerceptronParams with Logging {
+  extends Estimator[MultilayerPerceptronRegressorModel]
+  with MultilayerPerceptronParams with HasInputCol with HasOutputCol with HasRawPredictionCol
+  with Logging {
+
+  /** @group setParam */
+  def setInputCol(value: String): this.type = set(inputCol, value)
+
+  /** @group setParam */
+  def setOutputCol(value: String): this.type = set(outputCol, value)
+
+  /**
+   * Fits a model to the input data.
+   */
+  override def fit(dataset: DataFrame): MultilayerPerceptronRegressorModel = {
+      val data = dataset.select($(inputCol), $(outputCol)).map {
+        case Row(x: Vector, y: Vector) => (x, y)
+      }
+      val myLayers = getLayers
+      val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, false)
+      val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
+      FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol(getTol).setNumIterations(getMaxIter)
+      FeedForwardTrainer.setBatchSize(getBlockSize)
+      val mlpModel = FeedForwardTrainer.train(data)
+      new MultilayerPerceptronRegressorModel(uid, myLayers, mlpModel.weights())
+  }
+
+  /**
+   * :: DeveloperApi ::
+   *
+   * Derives the output schema from the input schema.
+   */
+  override def transformSchema(schema: StructType): StructType = {
+    val inputType = schema($(inputCol)).dataType
+    require(inputType.isInstanceOf[VectorUDT],
+      s"Input column ${$(inputCol)} must be a vector column")
+    val outputType = schema($(outputCol)).dataType
+    require(outputType.isInstanceOf[VectorUDT],
+      s"Input column ${$(outputCol)} must be a vector column")
+    require(!schema.fieldNames.contains($(rawPredictionCol)),
+      s"Output column ${$(rawPredictionCol)} already exists.")
+    val outputFields = schema.fields :+ StructField($(rawPredictionCol), new VectorUDT, false)
+    StructType(outputFields)
+  }
 
   def this() = this(Identifiable.randomUID("mlpr"))
 
   override def copy(extra: ParamMap): MultilayerPerceptronRegressor = defaultCopy(extra)
-
-  /**
-   * Train a model using the given dataset and parameters.
-   * Developers can implement this instead of [[fit()]] to avoid dealing with schema validation
-   * and copying parameters into the model.
-   *
-   * @param dataset  Training dataset
-   * @return  Fitted model
-   */
-  override protected def train(dataset: DataFrame): MultilayerPerceptronRegressorModel = {
-    // TODO: find a better way to get Vectors
-    val data = dataset.map { x => (x.getAs[Vector](0), x.getAs[Vector](1)) }
-    val myLayers = getLayers
-    val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, false)
-    val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
-    FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol(getTol).setNumIterations(getMaxIter)
-    FeedForwardTrainer.setBatchSize(getBlockSize)
-    val mlpModel = FeedForwardTrainer.train(data)
-    new MultilayerPerceptronRegressorModel(uid, myLayers, mlpModel.weights())
-  }
 }
 
 /**
@@ -140,25 +162,37 @@ class MultilayerPerceptronRegressor (override val uid: String)
 class MultilayerPerceptronRegressorModel private[ml] (override val uid: String,
                                                       layers: Array[Int],
                                                       weights: Vector)
-  extends RegressionModel[Vector, MultilayerPerceptronRegressorModel]{
+  extends Model[MultilayerPerceptronRegressorModel]
+  with HasInputCol with HasRawPredictionCol {
 
   private val mlpModel =
     FeedForwardTopology.multiLayerPerceptron(layers, false).getInstance(weights)
 
+  /** @group setParam */
+  def setInputCol(value: String): this.type = set(inputCol, value)
+
   /**
-   * Predict label for the given features.
-   * This internal method is used to implement [[transform()]] and output [[predictionCol]].
+   * Transforms the input dataset.
    */
-  override protected def predict(features: Vector): Double = {
-    Bargmax(predictVector(features).toArray).toDouble
+  override def transform(dataset: DataFrame): DataFrame = {
+    transformSchema(dataset.schema, logging = true)
+    val pcaOp = udf { mlpModel.predict _ }
+    dataset.withColumn($(rawPredictionCol), pcaOp(col($(inputCol))))
   }
 
   /**
-   * Predict output for the given input.
-   * @param feautres features vector
+   * :: DeveloperApi ::
+   *
+   * Derives the output schema from the input schema.
    */
-  def predictVector(feautres: Vector): Vector = {
-    mlpModel.predict(feautres)
+  override def transformSchema(schema: StructType): StructType = {
+    val inputType = schema($(inputCol)).dataType
+    require(inputType.isInstanceOf[VectorUDT],
+      s"Input column ${$(inputCol)} must be a vector column")
+    require(!schema.fieldNames.contains($(rawPredictionCol)),
+      s"Output column ${$(rawPredictionCol)} already exists.")
+    val outputFields = schema.fields :+ StructField($(rawPredictionCol), new VectorUDT, false)
+    StructType(outputFields)
   }
 
   override def copy(extra: ParamMap): MultilayerPerceptronRegressorModel = {
