@@ -20,19 +20,27 @@ package org.apache.spark.mllib.ann
 import breeze.linalg.{DenseMatrix => BDM, DenseVector => BDV}
 import com.github.fommil.netlib.BLAS.{getInstance => NativeBLAS}
 
-
+/**
+ * In-place DGEMM and DGEMV for Breeze
+ */
 object BreezeUtil {
 
   private def transposeString(a: BDM[Double]): String = if (a.isTranspose) "T" else "N"
 
-  // TODO: add code if matrices isTranspose!!!
-
+  /**
+   * DGEMM: C := alpha * A * B + beta * C
+   * @param alpha alpha
+   * @param a A
+   * @param b B
+   * @param beta beta
+   * @param c C
+   */
   def dgemm(alpha: Double, a: BDM[Double], b: BDM[Double], beta: Double, c: BDM[Double]): Unit = {
+    // TODO: add code if matrices isTranspose!!!
     require(a.cols == b.rows, "A & B Dimension mismatch!")
     require(a.rows == c.rows, "A & C Dimension mismatch!")
     require(b.cols == c.cols, "A & C Dimension mismatch!")
     if(a.rows == 0 || b.rows == 0 || a.cols == 0 || b.cols == 0) {
-
     } else {
       NativeBLAS.dgemm(transposeString(a), transposeString(b), c.rows, c.cols, a.cols,
         alpha, a.data, a.offset, a.majorStride, b.data, b.offset, b.majorStride,
@@ -40,7 +48,15 @@ object BreezeUtil {
     }
   }
 
-  def gemv(alpha: Double, a: BDM[Double], x: BDV[Double], beta: Double, y: BDV[Double]): Unit = {
+  /**
+   * DGEMV: y := alpha * A * x + beta * y
+   * @param alpha alpha
+   * @param a A
+   * @param x x
+   * @param beta beta
+   * @param y y
+   */
+  def dgemv(alpha: Double, a: BDM[Double], x: BDV[Double], beta: Double, y: BDV[Double]): Unit = {
 
     require(a.cols == x.length, "A & b Dimension mismatch!")
 

@@ -37,7 +37,7 @@ import org.apache.spark.sql.types.{StructField, StructType}
 private[ml] trait MultilayerPerceptronParams extends PredictorParams
 with HasSeed with HasMaxIter with HasTol {
   /**
-   * Layer sizes including input and output.
+   * Layer sizes including input size and output size.
    * @group param
    */
   final val layers: IntArrayParam =
@@ -50,7 +50,8 @@ with HasSeed with HasMaxIter with HasTol {
       )
 
   /**
-   * Block size for stacking input data in matrices. Speeds up the computations
+   * Block size for stacking input data in matrices. Speeds up the computations.
+   * Cannot be more than the size of the dataset.
    * @group expertParam
    */
   final val blockSize: IntParam = new IntParam(this, "blockSize",
@@ -113,7 +114,9 @@ class MultilayerPerceptronRegressor (override val uid: String)
   def setOutputCol(value: String): this.type = set(outputCol, value)
 
   /**
-   * Fits a model to the input data.
+   * Fits a model to the input and output data.
+   * InputCol has to contain input vectors.
+   * OutputCol has to contain output vectors.
    */
   override def fit(dataset: DataFrame): MultilayerPerceptronRegressorModel = {
       val data = dataset.select($(inputCol), $(outputCol)).map {
@@ -123,7 +126,7 @@ class MultilayerPerceptronRegressor (override val uid: String)
       val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, false)
       val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
       FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol(getTol).setNumIterations(getMaxIter)
-      FeedForwardTrainer.setBatchSize(getBlockSize)
+      FeedForwardTrainer.setStackSize(getBlockSize)
       val mlpModel = FeedForwardTrainer.train(data)
       new MultilayerPerceptronRegressorModel(uid, myLayers, mlpModel.weights())
   }
@@ -156,7 +159,7 @@ class MultilayerPerceptronRegressor (override val uid: String)
  * Multi-layer perceptron regression model.
  *
  * @param layers array of layer sizes including input and output
- * @param weights weights or parameters of the model
+ * @param weights weights (or parameters) of the model
  */
 @Experimental
 class MultilayerPerceptronRegressorModel private[ml] (override val uid: String,
@@ -173,6 +176,8 @@ class MultilayerPerceptronRegressorModel private[ml] (override val uid: String,
 
   /**
    * Transforms the input dataset.
+   * InputCol has to contain input vectors.
+   * RawPrediction column will contain predictions (outputs of the regressor).
    */
   override def transform(dataset: DataFrame): DataFrame = {
     transformSchema(dataset.schema, logging = true)

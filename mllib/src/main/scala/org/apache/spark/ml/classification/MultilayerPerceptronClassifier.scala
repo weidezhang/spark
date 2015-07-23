@@ -17,20 +17,59 @@
 
 package org.apache.spark.ml.classification
 
+import breeze.linalg.{argmax => Bargmax}
+
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.ml.{PredictionModel, Predictor}
 import org.apache.spark.ml.param.ParamMap
 import org.apache.spark.ml.util.Identifiable
 import org.apache.spark.ml.regression.MultilayerPerceptronParams
 import org.apache.spark.mllib.ann.{FeedForwardTrainer, FeedForwardTopology}
-import org.apache.spark.mllib.classification.LabelConverter
-import org.apache.spark.mllib.linalg.Vector
+import org.apache.spark.mllib.linalg.{Vectors, Vector}
+import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.sql.DataFrame
 
 /**
  * :: Experimental ::
- * Multilayer perceptron classifier.
- * Each layer has sigmoid activation function. Output layer has softmax.
+ * Label to vector converter.
+ */
+@Experimental
+private object LabelConverter {
+
+  /**
+   * Encodes a label as a vector.
+   * Returns a vector of given length with zeroes at all positions
+   * and value 1.0 at the position that corresponds to the label.
+   *
+   * @param labeledPoint  labeled point
+   * @param labelCount total number of labels
+   * @return  vector encoding of a label
+   */
+  def apply(labeledPoint: LabeledPoint, labelCount: Int): (Vector, Vector) = {
+    val output = Array.fill(labelCount){0.0}
+    output(labeledPoint.label.toInt) = 1.0
+    (labeledPoint.features, Vectors.dense(output))
+  }
+
+  /**
+   * Converts a vector to a label.
+   * Returns the position of the maximal element of a vector.
+   *
+   * @param output  label encoded with a vector
+   * @return  label
+   */
+  def apply(output: Vector): Double = {
+    Bargmax(output.toBreeze.toDenseVector).toDouble
+  }
+}
+
+/**
+ * :: Experimental ::
+ * Classifier trainer based on the Multilayer Perceptron.
+ * Each layer has sigmoid activation function, output layer has softmax.
+ * Number of inputs has to be equal to the size of feature vectors.
+ * Number of outputs has to be equal to the total number of labels.
+ *
  */
 @Experimental
 class MultilayerPerceptronClassifier (override val uid: String)
@@ -57,12 +96,18 @@ class MultilayerPerceptronClassifier (override val uid: String)
     val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, true)
     val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
     FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol(getTol).setNumIterations(getMaxIter)
-    FeedForwardTrainer.setBatchSize(getBlockSize)
+    FeedForwardTrainer.setStackSize(getBlockSize)
     val mlpModel = FeedForwardTrainer.train(data)
     new MultilayerPerceptronClassifierModel(uid, myLayers, mlpModel.weights())
   }
 }
 
+/**
+ * :: Experimental ::
+ * Classifier model based on the Multilayer Perceptron.
+ * Each layer has sigmoid activation function, output layer has softmax.
+ */
+@Experimental
 class MultilayerPerceptronClassifierModel private[ml] (override val uid: String,
                                                       layers: Array[Int],
                                                       weights: Vector)
