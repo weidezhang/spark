@@ -40,7 +40,8 @@ class LocalPSMaster(
   def start(): Unit = {
     logInfo("Start local servers")
     for (i <- 0 until config.serverNum) {
-      val serverRef = rpcEnv.setupEndpoint(s"PSServer_$i", new LocalPSServer(rpcEnv, i, config.rowSize))
+      val serverRef =
+        rpcEnv.setupEndpoint(s"PSServer_$i", new LocalPSServer(rpcEnv, i, config.rowSize))
       serverRefs += serverRef
     }
 

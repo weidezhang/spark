@@ -58,7 +58,8 @@ class PSContext(sc: SparkContext, config: PSConfig) {
    * User specified a `func` to run on each partition of the input rdd.
    * Three arguments are passed to `func`: partitionId, data of input in this partition as an array
    * and a PSClient. This `func` can get parameters from parameter server through PSClient,
-   * compute delta to update the parameters based on the current parameters and data of this partition
+   * compute delta to update the parameters based on the current parameters and data
+   * of this partition
    * and update parameters using PSClient.
    * This `func` return a new iterator of type `U` to construct a new rdd.
    * See {{org.apache.spark.mllib.classification.PSLogisticRegression}} for an example.

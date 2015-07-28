@@ -124,7 +124,8 @@ class LocalPSClient(val clientId: Int, val masterUrl: String, val rowNum: Int) e
 
               initialized = true
 
-            case Failure(e) => logError(s"Client $clientId cannot get server refs: " + urls.mkString(", "), e)
+            case Failure(e) =>
+              logError(s"Client $clientId cannot get server refs: " + urls.mkString(", "), e)
           }
 
         case Failure(e) => logError(s"Cannot register with driver: $masterUrl", e)
