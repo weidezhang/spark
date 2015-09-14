@@ -18,12 +18,45 @@
 package org.apache.spark.ml.feature
 
 import org.apache.spark.SparkFunSuite
+import org.apache.spark.mllib.linalg.{Vector, Vectors}
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 
 class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
 
-  test("Autoencoder suite") {
-    // TODO: implement autoencoder test
-  }
+  val binaryData = Seq(
+    Vectors.dense(Array(1.0, 0.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.0, 1.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 1.0, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 0.0, 1.0)))
 
+  val real01Data = Seq(
+    Vectors.dense(Array(0.1, 0.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.0, 1.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 0.1, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 0.0, 0.1)))
+
+  val realData = Seq(Vectors.dense(Array(10.0, 0.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.0, 1.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 10.0, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 0.0, 10.0)))
+
+  test("Autoencoder suite for binary input") {
+    // TODO: implement autoencoder test for real in [0;1) and (-inf;+inf)
+    val rdd = sc.parallelize(realData, 2).map(x => Tuple1(x))
+    val df = sqlContext.createDataFrame(rdd).toDF("input")
+    val autoencoder = new Autoencoder()
+      .setLayers(Array(4, 2, 4))
+      .setMaxIter(100)
+      .setSeed(11L)
+      .setTol(1e-4)
+      .setInputCol("input")
+      .setOutputCol("output")
+    // TODO: find a way to inherit the input and output parameter value from estimator
+    val model = autoencoder
+      .fit(df)
+      .setInputCol("input")
+      .setOutputCol("output")
+    // TODO: how the check that output makes sense?
+    model.transform(df).collect.foreach(println)
+  }
 }
