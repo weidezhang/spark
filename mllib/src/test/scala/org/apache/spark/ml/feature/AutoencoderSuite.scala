@@ -23,6 +23,7 @@ import org.apache.spark.mllib.util.MLlibTestSparkContext
 
 class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
 
+  // using data from https://inst.eecs.berkeley.edu/~cs182/sp08/assignments/a3-tlearn.html
   val binaryData = Seq(
     Vectors.dense(Array(1.0, 0.0, 0.0, 0.0)),
     Vectors.dense(Array(0.0, 1.0, 0.0, 0.0)),
