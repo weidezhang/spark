@@ -20,9 +20,9 @@ package org.apache.spark.ml.classification
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.ml.param.shared.{HasTol, HasMaxIter, HasSeed}
 import org.apache.spark.ml.{PredictorParams, PredictionModel, Predictor}
-import org.apache.spark.ml.param.{IntParam, ParamValidators, IntArrayParam, ParamMap}
+import org.apache.spark.ml.param._
 import org.apache.spark.ml.util.Identifiable
-import org.apache.spark.ml.ann.{FeedForwardTrainer, FeedForwardTopology}
+import org.apache.spark.ml.ann.{DropoutTopology, FeedForwardTrainer, FeedForwardTopology}
 import org.apache.spark.mllib.linalg.{Vectors, Vector}
 import org.apache.spark.mllib.regression.LabeledPoint
 import org.apache.spark.sql.DataFrame
@@ -63,11 +63,33 @@ private[ml] trait MultilayerPerceptronParams extends PredictorParams
   /** @group getParam */
   final def getBlockSize: Int = $(blockSize)
 
-  setDefault(maxIter -> 100, tol -> 1e-4, layers -> Array(1, 1), blockSize -> 128)
+  /**
+   * Dropout, a way of preventing neural network from overfitting
+   * as presented in http://jmlr.org/papers/volume15/srivastava14a/srivastava14a.pdf
+   * The key idea is to randomly drop units (along with their connections)
+   * from the neural network during training. At test time a single
+   * unthinned network that has smaller weights is used by
+   * multiplying the weights of all dropped layers on dropout probability.
+   * @group expertParam
+   */
+  final val inputDropoutProb: DoubleParam = new DoubleParam(this, "inputDropoutProb",
+    "Probability of input dropout", ParamValidators.inRange(0.0, 1.0))
+
+  /** @group getParam */
+  final def getInputDropoutProb: Double = $(inputDropoutProb)
+
+  final val layerDropoutProb: DoubleParam = new DoubleParam(this, "layerDropoutProb",
+    "Probability of layer dropout", ParamValidators.inRange(0.0, 1.0))
+
+  /** @group getParam */
+  final def getLayerDropoutProb: Double = $(layerDropoutProb)
+
+  setDefault(maxIter -> 100, tol -> 1e-4, layers -> Array(1, 1), blockSize -> 128,
+    inputDropoutProb -> 0.0, layerDropoutProb -> 0.0)
 }
 
 /** Label to vector converter. */
-private object LabelConverter {
+private[ml] object LabelConverter {
   // TODO: Use OneHotEncoder instead
   /**
    * Encodes a label as a vector.
@@ -138,6 +160,18 @@ class MultilayerPerceptronClassifier(override val uid: String)
    */
   def setSeed(value: Long): this.type = set(seed, value)
 
+  /**
+   * Set the input dropout probability.
+   * @group setParam
+   */
+  def setInputDropoutProb(value: Double): this.type = set(inputDropoutProb, value)
+
+  /**
+   * Set the output dropout probability.
+   * @group setParam
+   */
+  def setLayerDropoutProb(value: Double): this.type = set(layerDropoutProb, value)
+
   override def copy(extra: ParamMap): MultilayerPerceptronClassifier = defaultCopy(extra)
 
   /**
@@ -153,11 +187,16 @@ class MultilayerPerceptronClassifier(override val uid: String)
     val labels = myLayers.last
     val lpData = extractLabeledPoints(dataset)
     val data = lpData.map(lp => LabelConverter.encodeLabeledPoint(lp, labels))
-    val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, true)
-    val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
-    FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol($(tol)).setNumIterations($(maxIter))
-    FeedForwardTrainer.setStackSize($(blockSize))
-    val mlpModel = FeedForwardTrainer.train(data)
+    val defaultTopology = FeedForwardTopology.multiLayerPerceptron(myLayers, true)
+    val topology = if ($(inputDropoutProb) == 0.0 && $(layerDropoutProb) == 0) {
+      defaultTopology
+    } else {
+      new DropoutTopology(defaultTopology.layers, $(inputDropoutProb), $(layerDropoutProb))
+    }
+    val trainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
+    trainer.LBFGSOptimizer.setConvergenceTol($(tol)).setNumIterations($(maxIter))
+    trainer.setStackSize($(blockSize))
+    val mlpModel = trainer.train(data)
     new MultilayerPerceptronClassificationModel(uid, myLayers, mlpModel.weights())
   }
 }
