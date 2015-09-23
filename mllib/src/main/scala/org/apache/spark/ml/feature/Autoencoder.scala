@@ -31,6 +31,8 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.{Row, DataFrame}
 import org.apache.spark.sql.types.{StructField, StructType}
 
+import breeze.linalg.{DenseVector => BDV}
+
 /**
  * Params for [[Autoencoder]] and [[AutoencoderModel]].
  */
@@ -93,10 +95,14 @@ class Autoencoder (override val uid: String) extends Estimator[AutoencoderModel]
    * Fits a model to the input data.
    */
   override def fit(dataset: DataFrame): AutoencoderModel = {
+    fit2(dataset)._1
+  }
+
+  def fit2(dataset: DataFrame): (AutoencoderModel, AutoencoderModel) = {
     val data = dataset.select($(inputCol)).map { case Row(x: Vector) => (x, x) }
     val myLayers = $(layers)
     // TODO: initialize topology based on the data type (binary, real [0..1], real)
-    // binary => false + cross entropy
+    // binary => false + cross entropy (works with false + sq error??)
     // real [0..1] => false + sq error
     // real [0..1] that sum to one => true + cross entropy
     // real => remove the top layer + sq error
@@ -110,7 +116,12 @@ class Autoencoder (override val uid: String) extends Estimator[AutoencoderModel]
     // TODO: parameter for the layer which is supposed to be encoder output
     // in case of deep autoencoders
     // TODO: what about decoder back to normal?
-    new AutoencoderModel(uid, myLayers.init, autoencoderModel.weights())
+    val allWeights = autoencoderModel.weights()
+    val encoder = new AutoencoderModel(uid, myLayers.init, allWeights)
+    val offset = autoencoderModel.layerModels(0).size
+    val decoderWeights = Vectors.fromBreeze(new BDV(allWeights.toArray, offset))
+    val decoder = new AutoencoderModel(uid + "decoder", myLayers.tail, decoderWeights)
+    (encoder, decoder)
   }
 
   private def inputDataType(data: RDD[(Vector, Vector)]): InputDataType = {
@@ -162,7 +173,7 @@ class AutoencoderModel private[ml] (override val uid: String,
 
   // TODO: make sure that the same topology is created as in Autoencoder
   private val autoecoderModel =
-    FeedForwardTopology.multiLayerPerceptron(layers, true).getInstance(weights)
+    FeedForwardTopology.multiLayerPerceptron(layers, false).getInstance(weights)
 
 
   override def copy(extra: ParamMap): AutoencoderModel = {

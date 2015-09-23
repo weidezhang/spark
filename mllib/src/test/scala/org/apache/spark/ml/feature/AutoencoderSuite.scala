@@ -18,7 +18,7 @@
 package org.apache.spark.ml.feature
 
 import org.apache.spark.SparkFunSuite
-import org.apache.spark.mllib.linalg.{Vector, Vectors}
+import org.apache.spark.mllib.linalg.{VectorUDT, Vectors, Vector}
 import org.apache.spark.mllib.util.MLlibTestSparkContext
 
 class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
@@ -43,21 +43,25 @@ class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
 
   test("Autoencoder suite for binary input") {
     // TODO: implement autoencoder test for real in [0;1) and (-inf;+inf)
-    val rdd = sc.parallelize(realData, 2).map(x => Tuple1(x))
+    val rdd = sc.parallelize(binaryData, 2).map(x => Tuple1(x))
     val df = sqlContext.createDataFrame(rdd).toDF("input")
     val autoencoder = new Autoencoder()
-      .setLayers(Array(4, 2, 4))
-      .setMaxIter(100)
+      .setLayers(Array(4, 3, 4))
+      .setBlockSize(1)
+      .setMaxIter(200)
       .setSeed(11L)
-      .setTol(1e-4)
+      .setTol(1e-10)
       .setInputCol("input")
       .setOutputCol("output")
     // TODO: find a way to inherit the input and output parameter value from estimator
-    val model = autoencoder
-      .fit(df)
-      .setInputCol("input")
-      .setOutputCol("output")
+    val (encoderModel, decoderModel) = autoencoder.fit2(df)
+    encoderModel.setInputCol("input").setOutputCol("encoded")
+    decoderModel.setInputCol("encoded").setOutputCol("decoded")
     // TODO: how the check that output makes sense?
-    model.transform(df).collect.foreach(println)
+    val encodedData = encoderModel.transform(df)
+    val decodedData = decoderModel.transform(encodedData)
+    val eps = 0.01
+    println("Original, encoded & decoded")
+    decodedData.collect.foreach(println)
   }
 }

@@ -465,6 +465,11 @@ private[ann] trait Topology extends Serializable{
  * Trait for ANN topology model
  */
 private[ann] trait TopologyModel extends Serializable{
+
+  /**
+   * Array of layer models
+   */
+  val layerModels: Array[LayerModel]
   /**
    * Forward propagation
    * @param data input data
