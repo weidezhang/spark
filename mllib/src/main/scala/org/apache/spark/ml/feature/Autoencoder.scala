@@ -57,6 +57,12 @@ class Autoencoder (override val uid: String) extends Estimator[AutoencoderModel]
 
   def this() = this(Identifiable.randomUID("autoencoder"))
 
+  /** @group setParam */
+  def setOptimizer(value: String): this.type = set(optimizer, value)
+
+  /** @group setParam */
+  def setLearningRate(value: Double): this.type = set(learningRate, value)
+
   // TODO: make sure that user understands how to set it
   /** @group setParam */
   def setLayers(value: Array[Int]): this.type = set(layers, value)
@@ -109,7 +115,21 @@ class Autoencoder (override val uid: String) extends Estimator[AutoencoderModel]
     // TODO: how to set one of the mentioned data types?
     val topology = FeedForwardTopology.multiLayerPerceptron(myLayers, false)
     val FeedForwardTrainer = new FeedForwardTrainer(topology, myLayers(0), myLayers.last)
-    FeedForwardTrainer.LBFGSOptimizer.setConvergenceTol($(tol)).setNumIterations($(maxIter))
+    $(optimizer) match {
+      case "GD" =>
+        val dataSize = data.count()
+        // TODO: implement GD that involves blockSize instead of fraction
+        // TODO: this formula does not make a lot of sense
+        val miniBatchFraction = $(blockSize) / dataSize
+        FeedForwardTrainer.SGDOptimizer
+          .setConvergenceTol($(tol))
+          .setNumIterations($(maxIter))
+          .setStepSize($(learningRate))
+          .setMiniBatchFraction(miniBatchFraction)
+      case _ => FeedForwardTrainer.LBFGSOptimizer
+        .setConvergenceTol($(tol))
+        .setNumIterations($(maxIter))
+    }
     FeedForwardTrainer.setStackSize($(blockSize))
     println(inputDataType(data).toString)
     val autoencoderModel = FeedForwardTrainer.train(data)

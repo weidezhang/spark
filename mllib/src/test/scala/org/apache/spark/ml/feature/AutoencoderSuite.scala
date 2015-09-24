@@ -32,10 +32,10 @@ class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
     Vectors.dense(Array(0.0, 0.0, 0.0, 1.0)))
 
   val real01Data = Seq(
-    Vectors.dense(Array(0.1, 0.0, 0.0, 0.0)),
+    Vectors.dense(Array(0.5, 0.0, 0.0, 0.0)),
     Vectors.dense(Array(0.0, 1.0, 0.0, 0.0)),
-    Vectors.dense(Array(0.0, 0.0, 0.1, 0.0)),
-    Vectors.dense(Array(0.0, 0.0, 0.0, 0.1)))
+    Vectors.dense(Array(0.0, 0.0, 0.5, 0.0)),
+    Vectors.dense(Array(0.0, 0.0, 0.0, 0.5)))
 
   val realData = Seq(Vectors.dense(Array(10.0, 0.0, 0.0, 0.0)),
     Vectors.dense(Array(0.0, 1.0, 0.0, 0.0)),

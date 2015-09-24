@@ -20,7 +20,7 @@ package org.apache.spark.ml.classification
 import org.apache.spark.annotation.Experimental
 import org.apache.spark.ml.param.shared.{HasTol, HasMaxIter, HasSeed}
 import org.apache.spark.ml.{PredictorParams, PredictionModel, Predictor}
-import org.apache.spark.ml.param.{IntParam, ParamValidators, IntArrayParam, ParamMap}
+import org.apache.spark.ml.param._
 import org.apache.spark.ml.util.Identifiable
 import org.apache.spark.ml.ann.{FeedForwardTrainer, FeedForwardTopology}
 import org.apache.spark.mllib.linalg.{Vectors, Vector}
@@ -61,7 +61,31 @@ private[ml] trait MultilayerPerceptronParams extends PredictorParams
   /** @group getParam */
   final def getBlockSize: Int = $(blockSize)
 
-  setDefault(maxIter -> 100, tol -> 1e-4, layers -> Array(1, 1), blockSize -> 128)
+  /**
+   * Optimizer setup.
+   * @group expertParam
+   */
+  final val optimizer: Param[String] = new Param[String](this, "optimizer",
+    " Allows setting the optimizer: minibatch gradient descent (GD) or LBFGS. " +
+      " The latter is recommended one. ",
+    ParamValidators.inArray[String](Array("GD", "LBFGS")))
+
+  /** @group getParam */
+  final def getOptimizer: String = $(optimizer)
+
+  /**
+   * Learning rate.
+   * @group expertParam
+   */
+  final val learningRate: DoubleParam = new DoubleParam(this, "learning rate",
+    " Sets the learning rate for gradient descent optimizer ",
+    ParamValidators.inRange(0, 1))
+
+  /** @group getParam */
+  final def getLearningRate: Double = $(learningRate)
+
+  setDefault(maxIter -> 100, tol -> 1e-4, layers -> Array(1, 1), blockSize -> 128,
+    optimizer -> "LBFGS", learningRate -> 0.03)
 }
 
 /** Label to vector converter. */

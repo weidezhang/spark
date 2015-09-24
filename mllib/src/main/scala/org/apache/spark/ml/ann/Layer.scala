@@ -372,7 +372,8 @@ private[ann] class SigmoidFunction extends ActivationFunction {
     ActivationFunction(output, target, result, m)
     // NB: operation :* don't have execution priority over summation
     // TODO: is adding epsilon a good way to fight log(o) ?
-    val res = -Bsum((target :* Blog(output + epsilons)) + ((ones - target) :* Blog(ones - output + epsilons))) / output.cols
+    val res = -Bsum((target :* Blog(output + epsilons)) +
+      ((ones - target) :* Blog(ones - output + epsilons))) / output.cols
     res
   }
 
@@ -452,7 +453,7 @@ private[ann] class FunctionalLayerModel private (val activationFunction: Activat
   def error(output: BDM[Double], target: BDM[Double]): (BDM[Double], Double) = {
     // TODO: allow user pick error
     activationFunction match {
-      case sigmoid: SigmoidFunction => /*crossEntropy(output, target)*/squared(output, target)
+      case sigmoid: SigmoidFunction => crossEntropy(output, target)//squared(output, target)
       case softmax: SoftmaxFunction => crossEntropy(output, target)
     }
   }
