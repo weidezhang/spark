@@ -20,6 +20,7 @@ package org.apache.spark.ml.feature
 import org.apache.spark.SparkFunSuite
 import org.apache.spark.mllib.linalg.{VectorUDT, Vectors, Vector}
 import org.apache.spark.mllib.util.MLlibTestSparkContext
+import org.apache.spark.sql.Row
 
 class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
 
@@ -43,7 +44,7 @@ class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
 
   test("Autoencoder suite for binary input") {
     // TODO: implement autoencoder test for real in [0;1) and (-inf;+inf)
-    val rdd = sc.parallelize(binaryData, 2).map(x => Tuple1(x))
+    val rdd = sc.parallelize(real01Data, 2).map(x => Tuple1(x))
     val df = sqlContext.createDataFrame(rdd).toDF("input")
     val autoencoder = new Autoencoder()
       .setLayers(Array(4, 3, 4))
@@ -60,6 +61,12 @@ class AutoencoderSuite  extends SparkFunSuite with MLlibTestSparkContext {
     // TODO: how the check that output makes sense?
     val encodedData = encoderModel.transform(df)
     val decodedData = decoderModel.transform(encodedData)
+    val result = decodedData.map {
+      case Row(input: Vector, encoded: Vector, decoded: Vector) =>
+        Vectors.dense(decoded.toArray.map(x => math.round(x * 100).toDouble / 100))
+    }.collect()
+    println("decoded rounded")
+    result.foreach(println)
     val eps = 0.01
     println("Original, encoded & decoded")
     decodedData.collect.foreach(println)

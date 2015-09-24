@@ -349,6 +349,10 @@ private[ann] class SoftmaxFunction extends ActivationFunction {
  * Implements Sigmoid activation function
  */
 private[ann] class SigmoidFunction extends ActivationFunction {
+  private var ones: BDM[Double] = null
+  private val epsilon = 1e-15
+  private var epsilons: BDM[Double] = null
+
   override def eval(x: BDM[Double], y: BDM[Double]): Unit = {
     def s(z: Double): Double = Bsigmoid(z)
     ActivationFunction(x, y, s)
@@ -358,9 +362,18 @@ private[ann] class SigmoidFunction extends ActivationFunction {
     output: BDM[Double],
     target: BDM[Double],
     result: BDM[Double]): Double = {
+    if (ones == null || ones.cols != target.cols) {
+      ones = BDM.ones[Double](target.rows, target.cols)
+    }
+    if (epsilons == null || epsilons.cols != target.cols) {
+      epsilons = BDM.fill[Double](target.rows, target.cols)(epsilon)
+    }
     def m(o: Double, t: Double): Double = o - t
     ActivationFunction(output, target, result, m)
-    -Bsum(target :* Blog(output)) / output.cols
+    // NB: operation :* don't have execution priority over summation
+    // TODO: is adding epsilon a good way to fight log(o) ?
+    val res = -Bsum((target :* Blog(output + epsilons)) + ((ones - target) :* Blog(ones - output + epsilons))) / output.cols
+    res
   }
 
   override def derivative(x: BDM[Double], y: BDM[Double]): Unit = {
@@ -439,7 +452,7 @@ private[ann] class FunctionalLayerModel private (val activationFunction: Activat
   def error(output: BDM[Double], target: BDM[Double]): (BDM[Double], Double) = {
     // TODO: allow user pick error
     activationFunction match {
-      case sigmoid: SigmoidFunction => squared(output, target)
+      case sigmoid: SigmoidFunction => /*crossEntropy(output, target)*/squared(output, target)
       case softmax: SoftmaxFunction => crossEntropy(output, target)
     }
   }
@@ -601,6 +614,7 @@ private[ml] class FeedForwardModel private(
       }
       offset += gradArray.length
     }
+    println(newError)
     newError
   }
 
