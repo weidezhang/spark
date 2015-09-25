@@ -120,7 +120,7 @@ class Autoencoder (override val uid: String) extends Estimator[AutoencoderModel]
         val dataSize = data.count()
         // TODO: implement GD that involves blockSize instead of fraction
         // TODO: this formula does not make a lot of sense
-        val miniBatchFraction = $(blockSize) / dataSize
+        val miniBatchFraction = $(blockSize).toDouble / dataSize
         FeedForwardTrainer.SGDOptimizer
           .setConvergenceTol($(tol))
           .setNumIterations($(maxIter))
